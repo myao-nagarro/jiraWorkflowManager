@@ -164,7 +164,7 @@ def build_catalog(raw_workflows, raw_statuses, workflow_statuses, schemes, proje
     workflow_statuses: statuses returned next to the workflows (they carry the UUID references);
     project_scheme:    {project id: workflow scheme id};  projects: raw project list.
     """
-    spaces = {str(p["id"]): {"id": str(p["id"]), "key": p["key"], "name": p["name"]} for p in projects}
+    spaces = {str(p["id"]): {"id": str(p["id"]), "key": p["key"], "name": p["name"], "type": p.get("projectTypeKey") or ""} for p in projects}
     statuses = {}
     for s in (normalize_status(r) for r in list(raw_statuses) + list(workflow_statuses)):
         if s["id"]:
@@ -201,6 +201,7 @@ def build_catalog(raw_workflows, raw_statuses, workflow_statuses, schemes, proje
         wf["project_keys"] = sorted(spaces[p]["key"] for p in pids if p in spaces)
         wf["project_ids"] = sorted(pids)
         wf["active"] = wf["is_active"] if isinstance(wf["is_active"], bool) else bool(pids)
+        wf["jsm"] = any(spaces[p]["type"] == "service_desk" for p in pids if p in spaces)   # used by a Jira Service Management space
 
     usage = defaultdict(list)
     for wf in workflows:

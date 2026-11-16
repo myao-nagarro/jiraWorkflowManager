@@ -60,6 +60,23 @@ def page_header(title, caption=""):
     return box
 
 
+def command_bar(filters, search, actions):
+    """The controls above a table, in two rows: the search box with the page actions, then the filters (a number is a gap in pixels)."""
+    box = QVBoxLayout(); box.setSpacing(10)
+    top = QHBoxLayout(); top.setSpacing(8)
+    top.addWidget(search, 1)
+    for a in actions:
+        top.addWidget(a)
+    box.addLayout(top)
+    if filters:
+        row = QHBoxLayout(); row.setSpacing(10)
+        for f in filters:
+            row.addSpacing(f) if isinstance(f, int) else row.addWidget(f)
+        row.addStretch()
+        box.addLayout(row)
+    return box
+
+
 def button(text, primary=False, subtle=False):
     b = Btn(text)
     b.setProperty("primary", primary)
@@ -68,7 +85,7 @@ def button(text, primary=False, subtle=False):
     return b
 
 
-HEADING_ROLES = ("title", "subtitle", "field", "navtitle")
+HEADING_ROLES = ("title", "subtitle", "heading", "field", "navtitle", "navgroup")
 
 
 def label(text, role=None, verbatim=False):
@@ -255,8 +272,13 @@ class AutoFitTable(QTableWidget):
                 if wd is not None and wd.property("fit"):   # a cell widget that sizes itself: take the width it asks for
                     wd.ensurePolished()
                     need = wd.sizeHint().width()
-                    for lab in wd.findChildren(LinkLabel):   # a link's size hint was taken before the app font applied: measure its text here
-                        lines = lab.property("lines") or []
+                    for lab in wd.findChildren(QLabel):   # a label's size hint may be older than the app font: measure its text here
+                        if isinstance(lab, LinkLabel):
+                            lines = lab.property("lines") or []
+                        elif lab.property("fitText"):
+                            lines = [lab.text()]
+                        else:
+                            continue
                         text_w = max((fm.horizontalAdvance(line) for line in lines), default=0) + 8
                         lab.setMinimumWidth(text_w)   # the layout may not give the link less than its text needs
                         need += max(0, text_w - lab.sizeHint().width())
@@ -360,7 +382,7 @@ class ScopesPanel(QFrame):
         super().__init__()
         self.setObjectName("scopes")
         v = QVBoxLayout(self); v.setContentsMargins(16, 12, 16, 12); v.setSpacing(4)
-        v.addWidget(label("Scopes of the service account", "field"))
+        v.addWidget(label("Scopes of the service account", "heading"))
         v.addWidget(label("Add these scopes when you create its OAuth 2.0 credentials.", "caption"))
         self.chips = []
         for title, badge, text, scopes in self.GROUPS:
@@ -541,7 +563,7 @@ class LoginPage(QWidget):
         self.who = label("", "field"); d.addWidget(self.who)
         self.where = label("", "caption"); d.addWidget(self.where)
         d.addSpacing(14)
-        self.loading_title = label("Loading your data", "field"); d.addWidget(self.loading_title)
+        self.loading_title = label("Loading your data", "heading"); d.addWidget(self.loading_title)
         self.steps = LoadSteps(); d.addWidget(self.steps)
         self.load_error = QLabel(); self.load_error.setObjectName("error"); self.load_error.setWordWrap(True); self.load_error.hide(); d.addWidget(self.load_error)
         d.addSpacing(14)
@@ -799,7 +821,7 @@ class WorkflowsPage(QWidget):
         self.page, self.page_size = 0, 50
 
         top = QHBoxLayout()
-        top.addLayout(page_header("Workflows", "Browse the workflows of your Jira site. Tick workflows to review the page template, create a job or delete inactive ones."), 1)
+        top.addLayout(page_header("Workflows", "Review the workflows of your Jira site. Select workflows to build a page template or a publishing job, or to delete inactive ones."), 1)
 
         self.state_active, self.state_inactive = QRadioButton("Active"), QRadioButton("Inactive")
         self.state_active.setChecked(True)
@@ -810,13 +832,10 @@ class WorkflowsPage(QWidget):
         self.search = QLineEdit(placeholderText="Search workflow or scheme"); self.search.setClearButtonEnabled(True)
         self.refresh_btn = button("Fetch workflows", primary=True); self.refresh_btn.clicked.connect(self.fetch)
         self.csv_btn = button("Export CSV"); self.csv_btn.clicked.connect(self.export_csv); self.csv_btn.setEnabled(False)
-        filt = QHBoxLayout(); filt.setSpacing(10)
-        filt.addWidget(label("Status", "field")); filt.addWidget(self.state_active); filt.addWidget(self.state_inactive)
-        filt.addSpacing(8)
-        filt.addWidget(label("Space", "field")); filt.addWidget(self.space)
         self.delete_btn = button("Delete"); self.delete_btn.setProperty("danger", True); self.delete_btn.setMinimumWidth(116)  # room for "Delete (12)"
         self.delete_btn.clicked.connect(self.delete_selected); self.delete_btn.setEnabled(False)
-        filt.addWidget(self.search, 1); filt.addWidget(self.delete_btn); filt.addWidget(self.csv_btn); filt.addWidget(self.refresh_btn)
+        filt = command_bar([label("Status", "field"), self.state_active, self.state_inactive, 12, label("Space", "field"), self.space],
+                           self.search, [self.delete_btn, self.csv_btn, self.refresh_btn])
 
         self.table = AutoFitTable(W_COLS, fixed={0: 56, 10: 104}, numeric=(5, 6, 7, 8))
         self.table.horizontalHeader().sectionClicked.connect(self._sort)
@@ -967,7 +986,7 @@ class WorkflowsPage(QWidget):
         for w in self.shown:
             r = self.table.rowCount(); self.table.insertRow(r)
             self.table.setCellWidget(r, 0, self._checkbox(w))
-            self.table.setCellWidget(r, 1, link(w["name"], workflow_edit_url(site, w), "Edit this workflow in Jira"))
+            self.table.setCellWidget(r, 1, workflow_name_cell(w, workflow_edit_url(site, w), "Edit this workflow in Jira"))
             keys = w["project_keys"]
             self.table.setItem(r, 2, cell(", ".join(keys[:3]) + (f" +{len(keys) - 3}" if len(keys) > 3 else "") or "—",
                                           tip=", ".join(keys)))
@@ -1156,7 +1175,7 @@ class SchemesPage(QWidget):
         self.sort, self.checked = (1, True), set()
 
         top = QHBoxLayout()
-        top.addLayout(page_header("Workflow schemes", "The schemes that connect workflows to work types in each space. Inactive schemes are used by no space and can be deleted."), 1)
+        top.addLayout(page_header("Workflow schemes", "Workflow schemes connect workflows to work types in each space. Inactive schemes are used by no space and can be deleted."), 1)
 
         self.state_active, self.state_inactive = QRadioButton("Active"), QRadioButton("Inactive")
         self.state_active.setChecked(True)
@@ -1169,11 +1188,8 @@ class SchemesPage(QWidget):
         self.csv_btn = button("Export CSV"); self.csv_btn.clicked.connect(self.export_csv); self.csv_btn.setEnabled(False)
         self.delete_btn = button("Delete"); self.delete_btn.setProperty("danger", True); self.delete_btn.setMinimumWidth(116)  # room for "Delete (12)"
         self.delete_btn.clicked.connect(self.delete_selected); self.delete_btn.setEnabled(False)
-        filt = QHBoxLayout(); filt.setSpacing(10)
-        filt.addWidget(label("Status", "field")); filt.addWidget(self.state_active); filt.addWidget(self.state_inactive)
-        filt.addSpacing(8)
-        filt.addWidget(label("Space", "field")); filt.addWidget(self.space)
-        filt.addWidget(self.search, 1); filt.addWidget(self.delete_btn); filt.addWidget(self.csv_btn); filt.addWidget(self.refresh_btn)
+        filt = command_bar([label("Status", "field"), self.state_active, self.state_inactive, 12, label("Space", "field"), self.space],
+                           self.search, [self.delete_btn, self.csv_btn, self.refresh_btn])
 
         self.table = AutoFitTable(SC_COLS, fixed={0: 56})
         header = self.table.horizontalHeader()
@@ -1380,13 +1396,26 @@ TAG_TIPS = {"Built-in": "Created by default in every new Jira site", "JSM": "Cre
 def status_name_cell(st):
     """The status name with its small tags (Built-in, JSM) next to it."""
     box = QWidget(); bl = QHBoxLayout(box); bl.setContentsMargins(12, 0, 8, 0); bl.setSpacing(8)
-    name = QLabel(st["name"]); name.setWordWrap(False); bl.addWidget(name)
+    name = QLabel(st["name"]); name.setWordWrap(False); name.setProperty("fitText", True); bl.addWidget(name)
     for t in st.get("tags", []):
         pill = tag(t, TAG_COLORS.get(t, "brand_fg"))
         pill.setToolTip(TAG_TIPS.get(t, ""))
         bl.addWidget(pill, alignment=Qt.AlignmentFlag.AlignVCenter)
     bl.addStretch()
     box.setProperty("fit", True)   # AutoFitTable gives the column the width this widget needs: the name is never wrapped or cut
+    return box
+
+
+def workflow_name_cell(w, url, tip):
+    """The workflow name as a link that is never wrapped, with a green JSM tag when a Jira Service Management space uses it."""
+    box = QWidget(); bl = QHBoxLayout(box); bl.setContentsMargins(0, 0, 8, 0); bl.setSpacing(8)
+    name = LinkLabel([(w["name"], url)], tip, sep="<br>")
+    name.setWordWrap(False); bl.addWidget(name)
+    if w.get("jsm"):
+        pill = tag("JSM", "success"); pill.setToolTip("Used by a Jira Service Management space")
+        bl.addWidget(pill, alignment=Qt.AlignmentFlag.AlignVCenter)
+    bl.addStretch()
+    box.setProperty("fit", True)
     return box
 
 
@@ -1434,15 +1463,8 @@ class StatusesPage(QWidget):
         self.managed_team.setToolTip("Statuses that belong to one space")
         self.search = QLineEdit(placeholderText="Search status name or ID"); self.search.setClearButtonEnabled(True)
         refresh = button("Refresh", primary=True); refresh.clicked.connect(self.refresh_requested)
-        filt = QHBoxLayout(); filt.setSpacing(10)
-        filt.addWidget(label("Status", "field")); filt.addWidget(self.state_active); filt.addWidget(self.state_inactive)
-        filt.addSpacing(8)
-        filt.addWidget(label("Category", "field")); filt.addWidget(self.category)
-        filt.addSpacing(8)
-        filt.addWidget(label("Managed by", "field"))
-        for b in (self.managed_company, self.managed_team):
-            filt.addWidget(b)
-        filt.addWidget(self.search, 1); filt.addWidget(refresh)
+        filt = command_bar([label("Status", "field"), self.state_active, self.state_inactive, 12, label("Category", "field"), self.category, 12,
+                            label("Managed by", "field"), self.managed_company, self.managed_team], self.search, [refresh])
 
         self.table = AutoFitTable(S_COLS, fixed={0: 40}, numeric=(5, 6))
         self.expanded = set()   # IDs of the statuses whose row is open
@@ -1569,11 +1591,7 @@ class ResolutionsPage(QWidget):
         self.search = QLineEdit(placeholderText="Search resolution name, ID or description"); self.search.setClearButtonEnabled(True)
         self.csv_btn = button("Export CSV"); self.csv_btn.clicked.connect(self.export_csv); self.csv_btn.setEnabled(False)
         refresh = button("Refresh", primary=True); refresh.clicked.connect(self.refresh_requested)
-        filt = QHBoxLayout(); filt.setSpacing(10)
-        filt.addWidget(label("Usage", "field"))
-        for b in (self.use_all, self.use_used, self.use_unused):
-            filt.addWidget(b)
-        filt.addWidget(self.search, 1); filt.addWidget(self.csv_btn); filt.addWidget(refresh)
+        filt = command_bar([label("Usage", "field"), self.use_all, self.use_used, self.use_unused], self.search, [self.csv_btn, refresh])
 
         self.table = AutoFitTable(R_COLS, fixed={0: 40}, numeric=(4, 5))
         header = self.table.horizontalHeader()
@@ -1722,7 +1740,7 @@ class TemplatePage(QWidget):
         def card(title, hint=""):
             f = QFrame(); f.setObjectName("card")
             l = QVBoxLayout(f); l.setContentsMargins(20, 16, 20, 16); l.setSpacing(8)
-            l.addWidget(label(title, "field"))
+            l.addWidget(label(title, "heading"))
             if hint:
                 l.addWidget(label(hint, "caption"))
             return f, l
@@ -1813,7 +1831,7 @@ class TemplatePage(QWidget):
         r4.addSpacing(16); r4.addWidget(self.q_lbl); r4.addWidget(self.quality); l3.addLayout(r4)
         l3.addWidget(self.png_preview)
 
-        self.status = label("Click “Save template” to keep your settings.", "caption")
+        self.status = label("Click “Save Template” to keep your settings.", "caption")
         self.save_btn = button("Save template", primary=True); self.save_btn.clicked.connect(self.persist)
         reset = button("Reset to defaults", subtle=True); reset.clicked.connect(self._reset)
 
@@ -1823,16 +1841,16 @@ class TemplatePage(QWidget):
             iv.addWidget(c)
         iv.addStretch()
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame); scroll.setWidget(inner)
-        head = QHBoxLayout(); head.addWidget(label("Confluence page template", "subtitle")); head.addStretch(); head.addWidget(reset)
-        v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(10)
+        head = QHBoxLayout(); head.addLayout(page_header("Confluence Page Template", "Choose what the generated Confluence page contains and how it is laid out."), 1)
+        head.addWidget(reset, 0, Qt.AlignmentFlag.AlignTop)
+        v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(12)
         v.addLayout(head)
-        v.addWidget(label("Choose what the generated Confluence page contains and how it is laid out.", "caption"))
         # live mock-up of the generated page next to the settings
         self.mockup = TemplatePreview()
         pscroll = QScrollArea(); pscroll.setWidgetResizable(True); pscroll.setFrameShape(QFrame.Shape.NoFrame); pscroll.setWidget(self.mockup)
         pcard = QFrame(); pcard.setObjectName("card"); pcard.setMinimumWidth(360)
         pl = QVBoxLayout(pcard); pl.setContentsMargins(16, 12, 16, 12); pl.setSpacing(6)
-        ph = QHBoxLayout(); ph.addWidget(label("Preview", "field")); ph.addStretch()
+        ph = QHBoxLayout(); ph.addWidget(label("Preview", "heading")); ph.addStretch()
         self.export_btn = button("Save diagram…", subtle=True); self.export_btn.clicked.connect(self.export_diagram); ph.addWidget(self.export_btn)
         pl.addLayout(ph)
         pl.addWidget(label("A mock-up of the page: columns, element order and macros, with the data of the first selected workflow.", "caption"))
@@ -1912,7 +1930,7 @@ class TemplatePage(QWidget):
         """A setting changed: refresh the preview and remember that the template is not saved yet."""
         self._dirty = True
         self._timer.start()
-        self.status.setText("Unsaved changes. Click “Save template” to keep them.")
+        self.status.setText("Unsaved changes. Click “Save Template” to keep them.")
         self.changed.emit()
 
     def is_dirty(self) -> bool:
@@ -2225,8 +2243,9 @@ class PublishPage(QWidget):
         self.tp = template_page
         self.jira, self.me, self.flows, self.target, self.running = None, {}, [], None, False
 
-        head = QHBoxLayout(); head.addWidget(label("Publish to Confluence", "subtitle")); head.addStretch()
-        edit = button("Edit Template", subtle=True); edit.clicked.connect(self.edit_template); head.addWidget(edit)
+        head = QHBoxLayout()
+        head.addLayout(page_header("Publish to Confluence", "Create one Confluence page for each selected workflow under the parent page or folder you choose."), 1)
+        edit = button("Edit Template", subtle=True); edit.clicked.connect(self.edit_template); head.addWidget(edit, 0, Qt.AlignmentFlag.AlignTop)
 
         # -- target
         card = QFrame(); card.setObjectName("card")
@@ -2255,7 +2274,7 @@ class PublishPage(QWidget):
         # -- labels
         lcard = QFrame(); lcard.setObjectName("card")
         lc = QVBoxLayout(lcard); lc.setContentsMargins(20, 16, 20, 16); lc.setSpacing(6)
-        lc.addWidget(label("Labels", "field"))
+        lc.addWidget(label("Labels", "heading"))
         lc.addWidget(label(f"“{REQUIRED_LABEL}” is always added. Add more below; they apply to every page published in this run "
                            "(lower case, no spaces: spaces become “-”).", "caption"))
         self.label_combo = QComboBox(); self.label_combo.setEditable(True)
@@ -2288,7 +2307,7 @@ class PublishPage(QWidget):
         v.addLayout(head)
         v.addWidget(label("Create one Confluence page per selected workflow under a parent page or folder.", "caption"))
         v.addLayout(cols)
-        v.addWidget(label("Workflows to Publish", "field")); v.addWidget(self.progress); v.addWidget(self.table, 1)
+        v.addWidget(label("Workflows to Publish", "heading")); v.addWidget(self.progress); v.addWidget(self.table, 1)
         self.job_btn = button("Create Job"); self.job_btn.setMinimumWidth(130)
         self.job_btn.setToolTip("Turn these workflows, the template and the destination into a job that a script can repeat on a server.")
         self.job_btn.clicked.connect(self.create_job)
@@ -2695,7 +2714,7 @@ class JobPage(QWidget):
     def _card(self, title, body, note=""):
         card = QFrame(); card.setObjectName("card")
         c = QVBoxLayout(card); c.setContentsMargins(20, 16, 20, 16); c.setSpacing(8)
-        c.addWidget(label(title, "field"))
+        c.addWidget(label(title, "heading"))
         if note:
             c.addWidget(label(note, "caption"))
         c.addWidget(body)
@@ -2962,7 +2981,7 @@ class JobPage(QWidget):
         panel = QWidget(); panel.setObjectName("page")
         v = QVBoxLayout(panel); v.setContentsMargins(8, 0, 0, 0); v.setSpacing(8)
         head = QHBoxLayout(); head.setSpacing(8)
-        head.addWidget(label("Script Preview", "field"))
+        head.addWidget(label("Script Preview", "heading"))
         self.lines = label("", "caption"); self.lines.setWordWrap(False); head.addWidget(self.lines); head.addStretch(1)
         copy = button("Copy", subtle=True); copy.clicked.connect(self.copy_script); head.addWidget(copy)
         v.addLayout(head)
@@ -3010,17 +3029,17 @@ class LogsPage(QWidget):
         super().__init__()
         self.setObjectName("page")
         top = QHBoxLayout()
-        top.addLayout(page_header("Logs", "Every change this app made to your Jira and Confluence sites."), 1)
+        top.addLayout(page_header("Logs", "A record of every change this app has made to your Jira and Confluence sites."), 1)
         self.search = QLineEdit(placeholderText="Search the log"); self.search.setClearButtonEnabled(True); self.search.setMinimumWidth(260)
         refresh = button("Refresh", primary=True); refresh.clicked.connect(self.reload)
         export = button("Export CSV"); export.clicked.connect(self.export_csv)
         opn = button("Open log file"); opn.clicked.connect(lambda: LOG_PATH.exists() and QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_PATH))))
-        top.addWidget(self.search); top.addWidget(opn); top.addWidget(export); top.addWidget(refresh)
+        bar = command_bar([], self.search, [opn, export, refresh])
         self.table = AutoFitTable(L_COLS)
         self.table.empty_text = "No changes recorded yet. The app writes an entry here whenever it changes your Jira or Confluence site."
         self.status = label("", "caption")
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(12)
-        v.addLayout(top); v.addWidget(self.table, 1); v.addWidget(self.status)
+        v.addLayout(top); v.addLayout(bar); v.addWidget(self.table, 1); v.addWidget(self.status)
         self.search.textChanged.connect(lambda _: self.fill())
         self.entries = []
 
@@ -3123,7 +3142,7 @@ class SettingsPage(QWidget):
         def card(title, hint=""):
             f = QFrame(); f.setObjectName("card")
             l = QVBoxLayout(f); l.setContentsMargins(20, 16, 20, 18); l.setSpacing(8)
-            l.addWidget(label(title, "subtitle"))
+            l.addWidget(label(title, "heading"))
             if hint:
                 l.addWidget(label(hint, "caption"))
             return f, l
@@ -3175,9 +3194,8 @@ class SettingsPage(QWidget):
             iv.addWidget(c)
         iv.addStretch()
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame); scroll.setWidget(inner)
-        v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(10)
-        v.addWidget(label("Settings", "subtitle"))
-        v.addWidget(label("Personalize how the app looks. These options do not change the pages you publish.", "caption"))
+        v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(12)
+        v.addLayout(page_header("Settings", "Choose how the app looks. These settings do not affect the pages you publish."))
         v.addWidget(scroll, 1)
 
         self.mode.changed.connect(lambda k: self._set("mode", k))
@@ -3302,8 +3320,9 @@ class SessionButton(QPushButton):
 
 
 class MainWindow(QMainWindow):
+    NAV_GROUPS = {"workflows": "Inventory", "template": "Documentation", "logs": "Monitoring"}   # a heading above the first page of each group
     PAGE = {}   # nav key -> page index, filled below (so no number in this class has to be kept in step with the list)
-    NAV = [("Sign In", "signin"), ("Workflows", "workflows"), ("Schemas", "schemes"), ("Statuses", "statuses"), ("Resolutions", "resolutions"), ("Template", "template"),
+    NAV = [("Sign In", "signin"), ("Workflows", "workflows"), ("Schemes", "schemes"), ("Statuses", "statuses"), ("Resolutions", "resolutions"), ("Template", "template"),
            ("Publish", "publish"), ("Job", "job"), ("Logs", "logs"), ("Settings", "settings")]
 
     def __init__(self):
@@ -3329,13 +3348,15 @@ class MainWindow(QMainWindow):
         sv.addSpacing(10)
         self.group = QButtonGroup(self); self.group.setExclusive(True)
         self.nav_btns = []
-        for i, (text, _) in enumerate(self.NAV):
+        for i, (text, kind) in enumerate(self.NAV):
             b = QPushButton(text); b.setProperty("nav", True); b.setCheckable(True)
             b.setIconSize(QSize(20, 20)); b.setCursor(Qt.CursorShape.PointingHandCursor)
             keys = f"Ctrl+{i + 1}" if i < 9 else "Ctrl+,"   # Ctrl+1 ... Ctrl+9, and Ctrl+, for the last page (Settings)
             b.setToolTip(f"{text}  ({keys})")
             self.group.addButton(b, i); self.nav_btns.append(b)
             if text != "Settings":
+                if kind in self.NAV_GROUPS:
+                    sv.addWidget(label(self.NAV_GROUPS[kind], "navgroup"))
                 sv.addWidget(b)
             QShortcut(QKeySequence(keys), self, activated=lambda i=i: self.nav_btns[i].isEnabled() and self.go(i))
         sv.addStretch()

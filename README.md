@@ -6,7 +6,7 @@ self-contained script that a server can run on a schedule.
 
 - [Requirements](#requirements) · [Permissions and scopes](#permissions-and-scopes) · [Getting started](#getting-started)
 - Step by step: [1 Sign in](#1-sign-in) · [2 Workflows](#2-workflows) · [3 Workflow viewer](#3-workflow-viewer) ·
-  [4 Schemas](#4-schemas-workflow-schemes) · [5 Statuses](#5-statuses) · [6 Resolutions](#6-resolutions) · [7 Template](#7-template) ·
+  [4 Schemes](#4-schemes-workflow-schemes) · [5 Statuses](#5-statuses) · [6 Resolutions](#6-resolutions) · [7 Template](#7-template) ·
   [8 Publish](#8-publish) · [9 Job](#9-job-and-the-generated-script) · [10 Logs](#10-logs) · [11 Settings](#11-settings)
 - [Keyboard shortcuts](#keyboard-shortcuts) · [Files the app writes](#files-the-app-writes) · [Build](#build-the-executable)
 
@@ -47,7 +47,7 @@ only the username / API-token method (see [Job](#9-job-and-the-generated-script)
 3. Open **Publish**, enter the parent page URL and click **Publish to Confluence** ([step 8](#8-publish)).
 4. Optional: click **Create Job** to export a script that repeats the publishing on a server ([step 9](#9-job-and-the-generated-script)).
 
-Before you sign in, Workflows, Schemas, Statuses, Resolutions and Publish are disabled; Template, Job, Logs and Settings are available.
+Before you sign in, Workflows, Schemes, Statuses, Resolutions and Publish are disabled; Template, Job, Logs and Settings are available.
 
 ## 1. Sign in
 
@@ -67,10 +67,11 @@ The lower left of the sidebar then shows your name and site; hover it to see **E
 
 ## 2. Workflows
 
-Lists the workflows of the site (read from Jira; refreshed with **Fetch workflows** or `F5`).
+Lists the workflows of the site (read from Jira; refreshed with **Fetch Workflows** or `F5`).
 
 - **Status**: *Active* (used by a workflow scheme) or *Inactive*. **Space** and a search box (workflow or scheme name) narrow the list.
-- **Columns**: Workflow (link to the Jira editor), Space, Workflow Scheme (link), Last Updated, Statuses, Properties,
+- **Columns**: Workflow (link to the Jira editor, never wrapped; a green **JSM** tag marks every workflow that a Jira Service
+  Management space uses), Space, Workflow Scheme (link), Last Updated, Statuses, Properties,
   Transitions, Screens, State, and a **View** button. Click a header to sort.
 - **Select**: row checkboxes, and the header checkbox for the rows on the page. Changing Status clears the selection.
 - **Open**: double-click a row or click **View** for the [workflow viewer](#3-workflow-viewer).
@@ -101,9 +102,9 @@ A pop-up with the flowchart of one workflow and its tables.
   the end of its label in the flowchart, the PNG, and the draw.io diagram.
   Selecting in the chart selects the table row and the other way round.
 
-## 4. Schemas (workflow schemes)
+## 4. Schemes (workflow schemes)
 
-- Filters: **Status** (Active / Inactive), **Space**, search (scheme, workflow or space). **Fetch schemes** refreshes.
+- Filters: **Status** (Active / Inactive), **Space**, search (scheme, workflow or space). **Fetch Schemes** refreshes.
 - Columns: Workflow Scheme (link), Spaces, Work Types, Workflows (links), State.
 - **Export CSV** of the rows shown. **Delete** only for Inactive schemes (confirmation; the workflows they use are not deleted).
 
@@ -142,7 +143,7 @@ Every resolution of the site, laid out like the Statuses page.
 
 ## 7. Template
 
-Designs the Confluence page. **Save template** keeps it in `template.json`; **Reset to defaults** restores it. A live **preview**
+Designs the Confluence page. **Save Template** keeps it in `template.json`; **Reset to Defaults** restores it. A live **preview**
 mock-up (using the first ticked workflow) shows the result. The app asks to save unsaved changes when you close it.
 
 - **Selected workflows** and **Choose workflows** (back to Workflows).
@@ -217,21 +218,28 @@ Every change the app makes (delete workflow / scheme, publish page, add report) 
 
 ## Look and feel
 
-The app follows the Microsoft Fluent 2 design language: buttons, page titles, headings, tabs and column headers are in Title Case
-(also when a button's text changes, for example *Delete (3)*), every data page starts with a one-line description of what it is for,
-empty tables say why they are empty and what to do, and disabled buttons explain in their tooltip what is missing.
-Table columns size themselves to their text (also after you change the text size): names and tags are never cut, long text wraps,
-and a horizontal scroll bar appears only when the text needs more room than the window has.
+The app follows the Microsoft Fluent 2 design language and uses the **Segoe UI** font.
+
+- **Navigation:** the sidebar groups the pages under *Inventory* (Workflows, Schemes, Statuses, Resolutions), *Documentation*
+  (Template, Publish, Job) and *Monitoring* (Logs); Sign In is at the top and Settings at the bottom.
+- **Page structure:** every page has the same parts: a title, one line that says what the page is for, a command bar (the search box and
+  the page actions in one row, the filters in the next), the content, and a status line.
+- **Type ramp:** page titles 24 px, section headings 16 px, body text 14 px, captions 12 px (all scale with the text size in Settings).
+- **Wording:** buttons, titles, headings, tabs and column headers are in Title Case (also when a button's text changes, for example
+  *Delete (3)*); empty tables say why they are empty; disabled buttons explain in their tooltip what is missing.
+- **Tables:** columns size themselves to their text (also after you change the text size): names and tags are never cut, long text wraps,
+  and a horizontal scroll bar appears only when the text needs more room than the window has.
+
 Change colors, accent and text size under [Settings](#11-settings).
 
 ## Keyboard shortcuts
 
 | Keys | Action |
 |---|---|
-| `Ctrl+1` … `Ctrl+9` | Sign In, Workflows, Schemas, Statuses, Resolutions, Template, Publish, Job, Logs |
+| `Ctrl+1` … `Ctrl+9` | Sign In, Workflows, Schemes, Statuses, Resolutions, Template, Publish, Job, Logs |
 | `Ctrl+,` | Settings |
 | `Ctrl+F` | Focus the search box of the page |
-| `F5` | Fetch again (Workflows, Schemas, Statuses, Resolutions) / reload the log |
+| `F5` | Fetch again (Workflows, Schemes, Statuses, Resolutions) / reload the log |
 | `Esc` / `Ctrl+0` | Release the selection in the viewer (`Esc` again closes it) |
 
 ## Files the app writes

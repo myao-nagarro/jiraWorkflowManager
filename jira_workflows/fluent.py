@@ -8,7 +8,7 @@ from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPalette
 
 MODES = [("light", "Light"), ("dark", "Dark"), ("system", "Use system setting")]
 TEXT_SIZES = [("small", "Small", 13), ("default", "Default", 14), ("large", "Large", 16), ("xlarge", "Extra large", 18)]
-FONT_FAMILIES = ["Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Helvetica Neue", "Arial"]
+FONT_FAMILIES = ["Segoe UI", "Segoe UI Variable", "Helvetica Neue", "Arial"]   # Fluent 2 type: Segoe UI first
 FONT_STACK = ", ".join(f'"{f}"' for f in FONT_FAMILIES) + ", sans-serif"
 
 # accent key -> (label, light (fill, hover, pressed, text/indicator, tint), dark (fill, hover, pressed, text/indicator, tint))
@@ -182,7 +182,9 @@ def build_qss(t: dict, px: int = 14) -> str:
 QMainWindow, QDialog, QMessageBox, QWidget#page {{ background: {t['canvas']}; }}
 QLabel {{ background: transparent; }}
 QLabel[role="title"] {{ font-size: {r(28)}px; font-weight: 600; }}
-QLabel[role="subtitle"] {{ font-size: {r(22)}px; font-weight: 600; }}
+QLabel[role="subtitle"] {{ font-size: {r(24)}px; font-weight: 600; }}
+QLabel[role="heading"] {{ font-size: {r(16)}px; font-weight: 600; }}
+QLabel[role="navgroup"] {{ font-size: {max(11, px - 2)}px; font-weight: 600; color: {t['fg3']}; padding: 12px 12px 2px 12px; }}
 QLabel[role="caption"] {{ font-size: {max(11, px - 2)}px; color: {t['fg3']}; }}
 QLabel[role="field"] {{ font-weight: 600; }}
 QFrame#card {{ background: {t['card']}; border: 1px solid {t['stroke2']}; border-radius: 8px; }}

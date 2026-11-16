@@ -1,0 +1,25 @@
+[MAIN]
+# PyQt6 is a compiled extension: pylint can only see its names when it may load it.
+extension-pkg-allow-list=PyQt6
+
+[FORMAT]
+# The code keeps one statement per idea on a line of up to about 190 characters (the style of the sibling apps).
+max-line-length=190
+
+[BASIC]
+# Qt event handlers receive an event that they often do not need.
+ignored-argument-names=_.*|e|event
+
+[MESSAGES CONTROL]
+# Style choices of this code base, not defects:
+#   multiple-statements       small setup lines such as `a.setX(1); b.setY(2)` in the Qt widget code
+#   missing-*-docstring       private helpers and Qt slots are named for what they do; public classes and modules have docstrings
+#   too-many-*                the pages are big Qt widgets that build their whole layout in __init__
+#   too-few-public-methods    small data and widget classes
+#   invalid-name              short names (r, c, s, p) for table rows, columns and painters
+#   import-outside-toplevel   a few imports are deferred on purpose
+#   use-dict-literal          dict(key=value, ...) is the readable form of the colour-token tables in fluent.py
+disable=multiple-statements,missing-function-docstring,missing-class-docstring,missing-module-docstring,
+        too-many-locals,too-many-statements,too-many-instance-attributes,too-many-arguments,too-many-positional-arguments,
+        too-many-branches,too-many-nested-blocks,too-many-public-methods,too-many-lines,too-few-public-methods,
+        invalid-name,import-outside-toplevel,use-dict-literal,broad-exception-caught,attribute-defined-outside-init

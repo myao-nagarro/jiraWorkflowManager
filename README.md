@@ -73,11 +73,12 @@ Lists the workflows of the site (read from Jira; refreshed with **Fetch Workflow
   (Select All and Clear are at the top; untick a space to remove it; nothing ticked means all spaces) and Jira Service Management
   spaces carry a green **JSM** tag. The search box (workflow or scheme name) sits in the same row, after the options.
 - **Columns**: Workflow (link to the Jira editor, never wrapped; a green **JSM** tag marks every workflow that a Jira Service
-  Management space uses), Workflow ID, Space, Workflow Scheme (link), Last Updated, Statuses, Properties,
+  Management space uses), Workflow ID, Space, Workflow Scheme (link), Last Updated, Statuses, Properties (shown as `S(5) / T(3)`: the number of status properties and the number of
+  transition properties; the tooltip lists them),
   Transitions, Screens, State, and a **View** button. Click a header to sort.
 - **Select**: row checkboxes, and the header checkbox for the rows on the page. Changing Status clears the selection.
 - **Open**: double-click a row or click **View** for the [workflow viewer](#3-workflow-viewer).
-- **Export CSV**: every workflow matching the filters.
+- **Export CSV**: every workflow matching the filters (with separate status-property and transition-property counts).
 - **Delete**: only for **Inactive** workflows. A confirmation lists the names; it cannot be undone and Jira refuses default
   workflows. Each delete is written to the [log](#10-logs).
 - **Paging**: Rows per page (25 / 50 / 100 / 200), Previous / Next.

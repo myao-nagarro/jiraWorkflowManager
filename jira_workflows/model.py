@@ -118,7 +118,8 @@ def normalize_workflow(raw: dict, by_id: dict, by_ref: dict) -> dict:
             "scope": scope.get("type", "GLOBAL"), "scope_project": str((scope.get("project") or {}).get("id") or ""),
             "is_active": raw.get("isActive"), "legacy_schemes": raw.get("schemes") or [],
             "statuses": statuses, "transitions": transitions,
-            "property_count": sum(len(s["properties"]) for s in statuses)}
+            "property_count": sum(len(s["properties"]) for s in statuses),
+            "transition_property_count": sum(len(t["properties"]) for t in transitions)}
 
 
 # Statuses Jira creates by itself: the system statuses (Open, In Progress, Reopened, Resolved, Closed), the CI ones (Building,

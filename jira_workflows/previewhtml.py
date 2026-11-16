@@ -25,7 +25,7 @@ code {{ font-family: Consolas, 'Courier New'; background-color: {SOFT}; }}
 
 # the sample shown while no workflow is selected
 SAMPLE = {"name": "Sample workflow", "id": "0d4e1c7a-0000-0000-0000-000000000000", "scope": "GLOBAL", "project_keys": ["ABC"],
-          "schemes": [{"id": "1", "name": "Sample scheme"}], "active": True, "updated": "2026-10-26T10:00:00Z", "property_count": 0, "screens": [],
+          "schemes": [{"id": "1", "name": "Sample scheme"}], "active": True, "updated": "2026-10-26T10:00:00Z", "property_count": 0, "transition_property_count": 0, "screens": [],
           "statuses": [{"id": "1", "name": "Open", "category": "TODO", "properties": {}},
                        {"id": "3", "name": "In Progress", "category": "IN_PROGRESS", "properties": {}},
                        {"id": "6", "name": "Done", "category": "DONE", "properties": {}}],

@@ -869,7 +869,7 @@ class WorkflowViewer(QDialog):
 W_COLS = ["", "WORKFLOW", "WORKFLOW ID", "SPACE", "WORKFLOW SCHEME", "LAST UPDATED", "STATUSES", "PROPERTIES", "TRANSITIONS", "SCREENS", "STATE", ""]
 W_KEYS = [lambda w: 0, lambda w: w["name"].lower(), lambda w: w["id"].lower(), lambda w: ", ".join(w["project_keys"]).lower(),
           lambda w: ", ".join(s["name"] for s in w["schemes"]).lower(), lambda w: w["updated"],
-          lambda w: len(w["statuses"]), lambda w: w["property_count"], lambda w: len(w["transitions"]), lambda w: len(w["screens"]),
+          lambda w: len(w["statuses"]), lambda w: w["property_count"] + w["transition_property_count"], lambda w: len(w["transitions"]), lambda w: len(w["screens"]),
           lambda w: w["active"], lambda w: 0]
 
 
@@ -1064,9 +1064,7 @@ class WorkflowsPage(QWidget):
                 self.table.setItem(r, 4, cell("—", color=T["fg3"]))
             self.table.setItem(r, 5, cell(fmt_date(w["updated"])))
             self.table.setItem(r, 6, cell(len(w["statuses"]), True))
-            props = [f"{s['name']}: {k}" + (f" = {v}" if v != "" else "") for s in w["statuses"] for k, v in sorted(s["properties"].items())]
-            self.table.setItem(r, 7, cell(w["property_count"], True, tip="\n".join(props[:25]) + (f"\n… +{len(props) - 25} more" if len(props) > 25 else "")
-                                          or "No status properties"))
+            self.table.setItem(r, 7, cell(f"S({w['property_count']}) / T({w['transition_property_count']})", True, tip=self._property_tip(w)))
             self.table.setItem(r, 8, cell(len(w["transitions"]), True))
             self.table.setItem(r, 9, cell(len(w["screens"]), True, tip="\n".join(n for _, n in w["screens"]) or "No transition screens"))
             self.table.setItem(r, 10, cell("Active" if w["active"] else "Inactive",
@@ -1213,16 +1211,26 @@ class WorkflowsPage(QWidget):
         if 0 <= row < len(self.shown):
             WorkflowViewer(self.shown[row], self.client.site, self.window()).exec()
 
+    @staticmethod
+    def _property_tip(w):
+        """The properties behind S(n) / T(m): the status properties, then the transition properties (the first 15 of each)."""
+        def lines(title, items):
+            more = f"\n… +{len(items) - 15} more" if len(items) > 15 else ""
+            return f"{title} ({len(items)})\n" + "\n".join(items[:15]) + more if items else f"{title}: none"
+        status = [f"{s['name']}: {k}" + (f" = {v}" if v != "" else "") for s in w["statuses"] for k, v in sorted(s["properties"].items())]
+        trans = [f"{t['name']}: {k}" + (f" = {v}" if v != "" else "") for t in w["transitions"] for k, v in sorted((t.get("properties") or {}).items())]
+        return "S = status properties, T = transition properties\n\n" + lines("Status properties", status) + "\n\n" + lines("Transition properties", trans)
+
     def export_csv(self):
         path, _ = QFileDialog.getSaveFileName(self, titlecase("Export workflows"), str(Path.home() / "jira_workflows.csv"), "CSV (*.csv)")
         if not path:
             return
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
             wr = csv.writer(f)
-            wr.writerow(["Workflow", "Workflow ID", "Spaces", "Workflow schemes", "Last updated", "Statuses", "Status properties", "Transitions", "Transition screens", "State"])
+            wr.writerow(["Workflow", "Workflow ID", "Spaces", "Workflow schemes", "Last updated", "Statuses", "Status properties", "Transition properties", "Transitions", "Transition screens", "State"])
             for w in self.filtered:   # every workflow that matches the filters, not only the current page
                 wr.writerow([w["name"], w["id"], ", ".join(w["project_keys"]), ", ".join(s["name"] for s in w["schemes"]),
-                             w["updated"], len(w["statuses"]), w["property_count"], len(w["transitions"]), len(w["screens"]), "Active" if w["active"] else "Inactive"])
+                             w["updated"], len(w["statuses"]), w["property_count"], w["transition_property_count"], len(w["transitions"]), len(w["screens"]), "Active" if w["active"] else "Inactive"])
         self.status.setText(f"Exported {len(self.filtered)} workflows to {path}")
 
 

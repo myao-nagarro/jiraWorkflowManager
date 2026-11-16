@@ -69,9 +69,11 @@ The lower left of the sidebar then shows your name and site; hover it to see **E
 
 Lists the workflows of the site (read from Jira; refreshed with **Fetch Workflows** or `F5`).
 
-- **Status**: *Active* (used by a workflow scheme) or *Inactive*. **Space** and a search box (workflow or scheme name) narrow the list.
+- **Status**: *Active* (used by a workflow scheme) or *Inactive*. **Space** is a drop-down in which you can tick any number of spaces
+  (Select All and Clear are at the top; untick a space to remove it; nothing ticked means all spaces) and Jira Service Management
+  spaces carry a green **JSM** tag. The search box (workflow or scheme name) sits in the same row, after the options.
 - **Columns**: Workflow (link to the Jira editor, never wrapped; a green **JSM** tag marks every workflow that a Jira Service
-  Management space uses), Space, Workflow Scheme (link), Last Updated, Statuses, Properties,
+  Management space uses), Workflow ID, Space, Workflow Scheme (link), Last Updated, Statuses, Properties,
   Transitions, Screens, State, and a **View** button. Click a header to sort.
 - **Select**: row checkboxes, and the header checkbox for the rows on the page. Changing Status clears the selection.
 - **Open**: double-click a row or click **View** for the [workflow viewer](#3-workflow-viewer).
@@ -104,7 +106,8 @@ A pop-up with the flowchart of one workflow and its tables.
 
 ## 4. Schemes (workflow schemes)
 
-- Filters: **Status** (Active / Inactive), **Space**, search (scheme, workflow or space). **Fetch Schemes** refreshes.
+- Filters: **Status** (Active / Inactive), **Space** (the same multi-select drop-down as on Workflows), search (scheme, workflow or space).
+  **Fetch Schemes** refreshes.
 - Columns: Workflow Scheme (link), Spaces, Work Types, Workflows (links), State.
 - **Export CSV** of the rows shown. **Delete** only for Inactive schemes (confirmation; the workflows they use are not deleted).
 
@@ -143,8 +146,10 @@ Every resolution of the site, laid out like the Statuses page.
 
 ## 7. Template
 
-Designs the Confluence page. **Save Template** keeps it in `template.json`; **Reset to Defaults** restores it. A live **preview**
-mock-up (using the first ticked workflow) shows the result. The app asks to save unsaved changes when you close it.
+Designs the Confluence page. **Save Template** keeps it in `template.json`; **Reset to Defaults** restores it. The **Preview** on the right shows the page for a ticked workflow (choose which one in the list above it) the way Confluence will show it: it
+is built from the very page text that is published (layout columns, table of contents, page properties, diagram, tables, code block, labels),
+with the **page hierarchy** above it (the parent page or folder, the content properties report, and one page for each workflow with its
+title and labels). Drag the handle between the settings and the preview to give the preview more room. The app asks to save unsaved changes when you close it.
 
 - **Selected workflows** and **Choose workflows** (back to Workflows).
 - **Page layout**: Columns (Single; Two columns narrow left / narrow right / equal; Three columns equal / narrow sides) and
@@ -222,8 +227,8 @@ The app follows the Microsoft Fluent 2 design language and uses the **Segoe UI**
 
 - **Navigation:** the sidebar groups the pages under *Inventory* (Workflows, Schemes, Statuses, Resolutions), *Documentation*
   (Template, Publish, Job) and *Monitoring* (Logs); Sign In is at the top and Settings at the bottom.
-- **Page structure:** every page has the same parts: a title, one line that says what the page is for, a command bar (the search box and
-  the page actions in one row, the filters in the next), the content, and a status line.
+- **Page structure:** every page has the same parts: a title, one line that says what the page is for, a command bar (the filter options,
+  the search box and the page actions in one row), the content, and a status line.
 - **Type ramp:** page titles 24 px, section headings 16 px, body text 14 px, captions 12 px (all scale with the text size in Settings).
 - **Wording:** buttons, titles, headings, tabs and column headers are in Title Case (also when a button's text changes, for example
   *Delete (3)*); empty tables say why they are empty; disabled buttons explain in their tooltip what is missing.
@@ -270,7 +275,7 @@ The result is `dist\WorkflowManager-v<version>.exe`. The version is in `jira_wor
 
 - Structure: `main.py` starts the app; the code is in the `jira_workflows` package (`ui.py` pages and dialogs, `api.py` Jira client,
   `confluence.py` Confluence client, `model.py` normalised workflows, statuses, resolutions and schemes, `flowchart.py`, `layout.py`
-  and `routing.py` the workflow diagram, `page.py` the Confluence page, `template.py` the page template, `jobscript.py` and
+  and `routing.py` the workflow diagram, `page.py` the Confluence page, `previewhtml.py` the page preview and its hierarchy, `template.py` the page template, `jobscript.py` and
   `runner_template.py` the exported job script, `fluent.py` the Fluent 2 theme).
 - Code check: `pip install pylint` then `python -m pylint main.py build.py jira_workflows` (settings in `.pylintrc`; the code scores 10/10).
 - The released executable of each version is in `dist/`.

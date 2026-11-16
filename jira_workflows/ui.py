@@ -7,9 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PyQt6.QtCore import QSettings, QBuffer, QEvent, QIODevice, QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QSettings, QBuffer, QEvent, QIODevice, QPoint, QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import (QColor, QDesktopServices, QFontDatabase, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPen, QPixmap,
-                         QShortcut)
+                         QShortcut, QTextDocument)
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QPlainTextEdit, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
@@ -28,7 +28,7 @@ from .page import is_portal
 from .flowexport import to_drawio
 from .jobscript import (DIAGRAM_NOTICE, apply_template, can_export, describe_destination, describe_template, diagram_position, generate_script,
                         job_name, load_job, make_job, save_job, script_name)
-from .preview import TemplatePreview
+from .previewhtml import PAGE_CSS, SAMPLE, hierarchy_html, page_preview
 from .screens import field_catalog, load_details
 from .textutil import titlecase
 from .template import (COLOR_STYLES, ELEMENTS, FLOW_FORMATS, GROUPS, LAYOUTS, LINE_STYLES, NODE_SCALES, PNG_QUALITY, WIDTH_OPTIONS, Template,
@@ -61,20 +61,18 @@ def page_header(title, caption=""):
 
 
 def command_bar(filters, search, actions):
-    """The controls above a table, in two rows: the search box with the page actions, then the filters (a number is a gap in pixels)."""
-    box = QVBoxLayout(); box.setSpacing(10)
-    top = QHBoxLayout(); top.setSpacing(8)
-    top.addWidget(search, 1)
+    """The controls above a table in one row: the filters (a number is a gap in pixels), the search box that takes the rest of
+    the width, and the page actions."""
+    row = QHBoxLayout(); row.setSpacing(10)
+    for f in filters:
+        if isinstance(f, int):
+            row.addSpacing(f)
+        else:
+            row.addWidget(f)
+    row.addWidget(search, 1)
     for a in actions:
-        top.addWidget(a)
-    box.addLayout(top)
-    if filters:
-        row = QHBoxLayout(); row.setSpacing(10)
-        for f in filters:
-            row.addSpacing(f) if isinstance(f, int) else row.addWidget(f)
-        row.addStretch()
-        box.addLayout(row)
-    return box
+        row.addWidget(a)
+    return row
 
 
 def button(text, primary=False, subtle=False):
@@ -135,7 +133,7 @@ def link(text, url, tip=""):
 
 def padded(widget, h=10, v=6):
     """Wrap a control (button ...) so that it keeps a margin inside its table cell."""
-    box = QWidget(); lay = QHBoxLayout(box); lay.setContentsMargins(h, v, h, v); lay.addWidget(widget)
+    box = QWidget(); lay = QHBoxLayout(box); lay.setContentsMargins(h, v, h, v); lay.addWidget(widget, 0, Qt.AlignmentFlag.AlignVCenter)
     return box
 
 
@@ -191,9 +189,10 @@ class AutoFitTable(QTableWidget):
     """Data grid: columns share the width according to their content, long text wraps instead of being cut, headers are
     left aligned (numbers right aligned) and links react to the mouse. `fixed` maps column -> width for check box / action columns."""
 
-    def __init__(self, columns, fixed=None, numeric=()):
+    def __init__(self, columns, fixed=None, numeric=(), nowrap=()):
         super().__init__(0, len(columns))
         self.fixed = dict(fixed or {})
+        self.nowrap = set(nowrap)   # columns whose text is never wrapped (IDs, dates): they keep the width of their text
         self.setHorizontalHeaderLabels([header_text(c) for c in columns])
         head = self.horizontalHeader()
         head.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -294,7 +293,7 @@ class AutoFitTable(QTableWidget):
         else:  # squeeze: every column keeps a minimum, the long ones give up the most and wrap
             lo = {c: min(w, max(160, hdr[c])) for c, w in want.items()}  # a column never gets narrower than its header (or 160 px of text)
             for c, w in want.items():   # a column of no-wrap cells keeps its width
-                if any((self.cellWidget(r, c) is not None and self.cellWidget(r, c).property("fit")) for r in range(self.rowCount())):
+                if c in self.nowrap or any((self.cellWidget(r, c) is not None and self.cellWidget(r, c).property("fit")) for r in range(self.rowCount())):
                     lo[c] = w
             spare, extra = max(0, room - sum(lo.values())), sum(w - lo[c] for c, w in want.items())
             widths = {c: lo[c] + (w - lo[c]) * min(1.0, spare / extra if extra else 1) for c, w in want.items()}
@@ -363,6 +362,78 @@ def portal_tag():
                     f"font-size: {max(12, T['px'] - 1)}px; font-weight: 600;")
     l.setToolTip("Customers can take this transition in the Jira Service Management portal")
     return l
+
+
+class SpacePopup(QFrame):
+    """The list of spaces under the filter button: one check box per space, a JSM tag on Jira Service Management spaces."""
+
+    def __init__(self, owner):
+        super().__init__(owner, Qt.WindowType.Popup)
+        self.setObjectName("card"); self.owner = owner
+        v = QVBoxLayout(self); v.setContentsMargins(8, 8, 8, 8); v.setSpacing(6)
+        actions = QHBoxLayout(); actions.setSpacing(6)
+        select_all, clear = button("Select All", subtle=True), button("Clear", subtle=True)
+        select_all.clicked.connect(lambda: self._set_all(True)); clear.clicked.connect(lambda: self._set_all(False))
+        actions.addWidget(select_all); actions.addWidget(clear); actions.addStretch(); v.addLayout(actions)
+        host = QWidget(); hl = QVBoxLayout(host); hl.setContentsMargins(4, 0, 4, 0); hl.setSpacing(4)
+        self.boxes = {}
+        for sp in owner.spaces:
+            row = QHBoxLayout(); row.setSpacing(8)
+            cb = QCheckBox(f"{sp['key']} — {sp['name']}"); cb.setChecked(sp["key"] in owner.selected)
+            cb.toggled.connect(lambda on, k=sp["key"]: owner.toggle(k, on))
+            row.addWidget(cb)
+            if sp.get("type") == "service_desk":
+                pill = tag("JSM", "success"); pill.setToolTip("Jira Service Management space"); row.addWidget(pill)
+            row.addStretch(); hl.addLayout(row); self.boxes[sp["key"]] = cb
+        hl.addStretch()
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame); scroll.setWidget(host)
+        scroll.setMinimumHeight(min(360, 34 * max(3, len(owner.spaces)) + 8)); scroll.setMinimumWidth(max(360, owner.width()))
+        v.addWidget(scroll)
+
+    def _set_all(self, on):
+        for cb in self.boxes.values():
+            cb.blockSignals(True); cb.setChecked(on); cb.blockSignals(False)
+        self.owner.set_selected({sp["key"] for sp in self.owner.spaces} if on else set())
+
+
+class SpaceFilter(QPushButton):
+    """A drop-down for choosing any number of spaces. Nothing chosen means all spaces; Clear (or unticking) removes a choice."""
+    changed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__("All Spaces")
+        self.setMinimumWidth(200); self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet("QPushButton { text-align: left; font-weight: 400; }")
+        self.spaces, self.selected, self._popup = [], set(), None
+        self.clicked.connect(self._open)
+
+    def set_spaces(self, spaces):
+        """The spaces to choose from ({key, name, type}); choices that no longer exist are dropped."""
+        self.spaces = sorted(spaces, key=lambda s: s["key"].lower())
+        self.selected &= {s["key"] for s in self.spaces}
+        self._refresh()
+
+    def keys(self):
+        return set(self.selected)
+
+    def toggle(self, key, on):
+        (self.selected.add if on else self.selected.discard)(key)
+        self._refresh(); self.changed.emit()
+
+    def set_selected(self, keys):
+        self.selected = set(keys)
+        self._refresh(); self.changed.emit()
+
+    def _refresh(self):
+        n = len(self.selected)
+        self.setText("All Spaces ▾" if not n else (sorted(self.selected)[0] if n == 1 else f"{n} Spaces") + " ▾")
+        self.setToolTip("Spaces: " + (", ".join(sorted(self.selected)) if n else "all"))
+
+    def _open(self):
+        self._popup = SpacePopup(self)
+        self._popup.adjustSize()
+        self._popup.move(self.mapToGlobal(QPoint(0, self.height() + 2)))
+        self._popup.show()
 
 
 class ScopesPanel(QFrame):
@@ -795,8 +866,8 @@ class WorkflowViewer(QDialog):
 
 
 # --------------------------------------------------------------------------- workflows
-W_COLS = ["", "WORKFLOW", "SPACE", "WORKFLOW SCHEME", "LAST UPDATED", "STATUSES", "PROPERTIES", "TRANSITIONS", "SCREENS", "STATE", ""]
-W_KEYS = [lambda w: 0, lambda w: w["name"].lower(), lambda w: ", ".join(w["project_keys"]).lower(),
+W_COLS = ["", "WORKFLOW", "WORKFLOW ID", "SPACE", "WORKFLOW SCHEME", "LAST UPDATED", "STATUSES", "PROPERTIES", "TRANSITIONS", "SCREENS", "STATE", ""]
+W_KEYS = [lambda w: 0, lambda w: w["name"].lower(), lambda w: w["id"].lower(), lambda w: ", ".join(w["project_keys"]).lower(),
           lambda w: ", ".join(s["name"] for s in w["schemes"]).lower(), lambda w: w["updated"],
           lambda w: len(w["statuses"]), lambda w: w["property_count"], lambda w: len(w["transitions"]), lambda w: len(w["screens"]),
           lambda w: w["active"], lambda w: 0]
@@ -828,7 +899,7 @@ class WorkflowsPage(QWidget):
         self.state_group = QButtonGroup(self)
         for b in (self.state_active, self.state_inactive):
             self.state_group.addButton(b)
-        self.space = QComboBox(); self.space.setMinimumWidth(240)
+        self.space = SpaceFilter()
         self.search = QLineEdit(placeholderText="Search workflow or scheme"); self.search.setClearButtonEnabled(True)
         self.refresh_btn = button("Fetch workflows", primary=True); self.refresh_btn.clicked.connect(self.fetch)
         self.csv_btn = button("Export CSV"); self.csv_btn.clicked.connect(self.export_csv); self.csv_btn.setEnabled(False)
@@ -837,7 +908,7 @@ class WorkflowsPage(QWidget):
         filt = command_bar([label("Status", "field"), self.state_active, self.state_inactive, 12, label("Space", "field"), self.space],
                            self.search, [self.delete_btn, self.csv_btn, self.refresh_btn])
 
-        self.table = AutoFitTable(W_COLS, fixed={0: 56, 10: 104}, numeric=(5, 6, 7, 8))
+        self.table = AutoFitTable(W_COLS, fixed={0: 56, 11: 104}, numeric=(6, 7, 8, 9), nowrap=(2, 5))
         self.table.horizontalHeader().sectionClicked.connect(self._sort)
         self.table.horizontalHeader().setSortIndicatorShown(True)
         self.table.horizontalHeader().setSortIndicator(1, Qt.SortOrder.AscendingOrder)
@@ -871,7 +942,7 @@ class WorkflowsPage(QWidget):
         v.addLayout(top); v.addLayout(filt); v.addWidget(self.progress); v.addWidget(self.table, 1); v.addLayout(bottom)
 
         self.state_group.buttonToggled.connect(self._state_changed)
-        self.space.currentIndexChanged.connect(lambda _: self._filter_changed())
+        self.space.changed.connect(self._filter_changed)
         self.search.textChanged.connect(lambda _: self._filter_changed())
         self.size_combo.currentIndexChanged.connect(lambda _: self._size_changed())
         self.prev_btn.clicked.connect(lambda: self._step(-1))
@@ -950,12 +1021,7 @@ class WorkflowsPage(QWidget):
         self.refresh_btn.setEnabled(True); self.progress.hide(); self.csv_btn.setEnabled(True)
         self.catalog = catalog
         self.checked &= {w["name"] for w in catalog["workflows"]}
-        current = self.space.currentData()
-        self.space.blockSignals(True); self.space.clear(); self.space.addItem("All spaces", None)
-        for s in catalog["spaces"]:
-            self.space.addItem(f"{s['key']} — {s['name']}", s["key"])
-        i = self.space.findData(current)
-        self.space.setCurrentIndex(max(i, 0)); self.space.blockSignals(False)
+        self.space.set_spaces(catalog["spaces"])
         self.apply_filter()
         self.loaded.emit(catalog)
 
@@ -963,12 +1029,12 @@ class WorkflowsPage(QWidget):
     def apply_filter(self):
         if not self.catalog:
             return
-        want_active, key, q = self.state_active.isChecked(), self.space.currentData(), self.search.text().strip().lower()
+        want_active, keys, q = self.state_active.isChecked(), self.space.keys(), self.search.text().strip().lower()
         rows = []
         for w in self.catalog["workflows"]:
             if w["active"] != want_active:
                 continue
-            if key and key not in w["project_keys"]:
+            if keys and not keys & set(w["project_keys"]):
                 continue
             if q and q not in w["name"].lower() and not any(q in s["name"].lower() for s in w["schemes"]):
                 continue
@@ -987,25 +1053,26 @@ class WorkflowsPage(QWidget):
             r = self.table.rowCount(); self.table.insertRow(r)
             self.table.setCellWidget(r, 0, self._checkbox(w))
             self.table.setCellWidget(r, 1, workflow_name_cell(w, workflow_edit_url(site, w), "Edit this workflow in Jira"))
+            self.table.setItem(r, 2, cell(w["id"], color=T["fg3"]))
             keys = w["project_keys"]
-            self.table.setItem(r, 2, cell(", ".join(keys[:3]) + (f" +{len(keys) - 3}" if len(keys) > 3 else "") or "—",
+            self.table.setItem(r, 3, cell(", ".join(keys[:3]) + (f" +{len(keys) - 3}" if len(keys) > 3 else "") or "—",
                                           tip=", ".join(keys)))
             if w["schemes"]:
-                self.table.setCellWidget(r, 3, LinkLabel([(sc["name"], scheme_edit_url(site, sc["id"])) for sc in w["schemes"]],
+                self.table.setCellWidget(r, 4, LinkLabel([(sc["name"], scheme_edit_url(site, sc["id"])) for sc in w["schemes"]],
                                                          "Edit this workflow scheme in Jira"))
             else:
-                self.table.setItem(r, 3, cell("—", color=T["fg3"]))
-            self.table.setItem(r, 4, cell(fmt_date(w["updated"])))
-            self.table.setItem(r, 5, cell(len(w["statuses"]), True))
+                self.table.setItem(r, 4, cell("—", color=T["fg3"]))
+            self.table.setItem(r, 5, cell(fmt_date(w["updated"])))
+            self.table.setItem(r, 6, cell(len(w["statuses"]), True))
             props = [f"{s['name']}: {k}" + (f" = {v}" if v != "" else "") for s in w["statuses"] for k, v in sorted(s["properties"].items())]
-            self.table.setItem(r, 6, cell(w["property_count"], True, tip="\n".join(props[:25]) + (f"\n… +{len(props) - 25} more" if len(props) > 25 else "")
+            self.table.setItem(r, 7, cell(w["property_count"], True, tip="\n".join(props[:25]) + (f"\n… +{len(props) - 25} more" if len(props) > 25 else "")
                                           or "No status properties"))
-            self.table.setItem(r, 7, cell(len(w["transitions"]), True))
-            self.table.setItem(r, 8, cell(len(w["screens"]), True, tip="\n".join(n for _, n in w["screens"]) or "No transition screens"))
-            self.table.setItem(r, 9, cell("Active" if w["active"] else "Inactive",
+            self.table.setItem(r, 8, cell(len(w["transitions"]), True))
+            self.table.setItem(r, 9, cell(len(w["screens"]), True, tip="\n".join(n for _, n in w["screens"]) or "No transition screens"))
+            self.table.setItem(r, 10, cell("Active" if w["active"] else "Inactive",
                                           color=T["success"] if w["active"] else T["fg3"]))
             b = button("View", subtle=True); b.setToolTip("Show the flowchart"); b.clicked.connect(lambda _, r=r: self.view(r))
-            self.table.setCellWidget(r, 10, padded(b))
+            self.table.setCellWidget(r, 11, padded(b))
         self.table.refit()
         self._sync_selection(); self._place_select_all()
         n = len(self.catalog["workflows"])
@@ -1182,7 +1249,7 @@ class SchemesPage(QWidget):
         self.state_group = QButtonGroup(self)
         for b in (self.state_active, self.state_inactive):
             self.state_group.addButton(b)
-        self.space = QComboBox(); self.space.setMinimumWidth(240)
+        self.space = SpaceFilter()
         self.search = QLineEdit(placeholderText="Search scheme, workflow or space"); self.search.setClearButtonEnabled(True)
         self.refresh_btn = button("Fetch schemes", primary=True); self.refresh_btn.clicked.connect(self.refresh_requested)
         self.csv_btn = button("Export CSV"); self.csv_btn.clicked.connect(self.export_csv); self.csv_btn.setEnabled(False)
@@ -1206,7 +1273,7 @@ class SchemesPage(QWidget):
         v.addLayout(top); v.addLayout(filt); v.addWidget(self.progress); v.addWidget(self.table, 1); v.addWidget(self.status)
 
         self.state_group.buttonToggled.connect(self._state_changed)
-        self.space.currentIndexChanged.connect(lambda _: self.apply_filter())
+        self.space.changed.connect(self.apply_filter)
         self.search.textChanged.connect(lambda _: self.apply_filter())
 
     # ---- data ----
@@ -1222,11 +1289,7 @@ class SchemesPage(QWidget):
     def set_catalog(self, catalog):
         self.catalog = catalog
         self.checked &= {s["id"] for s in catalog["schemes"]}
-        current = self.space.currentData()
-        self.space.blockSignals(True); self.space.clear(); self.space.addItem("All spaces", None)
-        for s in catalog["spaces"]:
-            self.space.addItem(f"{s['key']} — {s['name']}", s["key"])
-        self.space.setCurrentIndex(max(self.space.findData(current), 0)); self.space.blockSignals(False)
+        self.space.set_spaces(catalog["spaces"])
         self.refresh_btn.setEnabled(True); self.csv_btn.setEnabled(True)
         self.apply_filter()
 
@@ -1234,10 +1297,10 @@ class SchemesPage(QWidget):
     def apply_filter(self):
         if not self.catalog:
             return
-        want_active, key, q = self.state_active.isChecked(), self.space.currentData(), self.search.text().strip().lower()
+        want_active, keys, q = self.state_active.isChecked(), self.space.keys(), self.search.text().strip().lower()
         rows = []
         for s in self.catalog["schemes"]:
-            if s["active"] != want_active or (key and key not in s["project_keys"]):
+            if s["active"] != want_active or (keys and not keys & set(s["project_keys"])):
                 continue
             hay = " ".join([s["name"], *s["project_keys"], *(r["workflow"] for r in s["rows"])]).lower()
             if q and q not in hay:
@@ -1846,20 +1909,25 @@ class TemplatePage(QWidget):
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(12)
         v.addLayout(head)
         # live mock-up of the generated page next to the settings
-        self.mockup = TemplatePreview()
-        pscroll = QScrollArea(); pscroll.setWidgetResizable(True); pscroll.setFrameShape(QFrame.Shape.NoFrame); pscroll.setWidget(self.mockup)
-        pcard = QFrame(); pcard.setObjectName("card"); pcard.setMinimumWidth(360)
+        self.view = QTextBrowser(); self.view.setOpenLinks(False); self.view.setOpenExternalLinks(False)
+        self.view.document().setDefaultStyleSheet(PAGE_CSS)
+        self.view.setStyleSheet("QTextBrowser { background: #FFFFFF; color: #172B4D; border: 1px solid #DFE1E6; border-radius: 6px; }")
+        self.view.anchorClicked.connect(self._preview_link)
+        self.preview_pick = QComboBox(); self.preview_pick.setToolTip("The workflow the preview shows"); self.preview_pick.setMaximumWidth(260)
+        self.preview_pick.currentIndexChanged.connect(lambda _: self._refresh_preview())
+        pcard = QFrame(); pcard.setObjectName("card"); pcard.setMinimumWidth(480)
         pl = QVBoxLayout(pcard); pl.setContentsMargins(16, 12, 16, 12); pl.setSpacing(6)
-        ph = QHBoxLayout(); ph.addWidget(label("Preview", "heading")); ph.addStretch()
+        ph = QHBoxLayout(); ph.addWidget(label("Preview", "heading")); ph.addStretch(); ph.addWidget(self.preview_pick)
         self.export_btn = button("Save diagram…", subtle=True); self.export_btn.clicked.connect(self.export_diagram); ph.addWidget(self.export_btn)
         pl.addLayout(ph)
-        pl.addWidget(label("A mock-up of the page: columns, element order and macros, with the data of the first selected workflow.", "caption"))
-        pl.addWidget(pscroll, 1)
-        body = QHBoxLayout(); body.setSpacing(16); body.addWidget(scroll, 3); body.addWidget(pcard, 2)
+        pl.addWidget(label("The page as Confluence will show it, built from the data of the selected workflow, with the page hierarchy above it.", "caption"))
+        pl.addWidget(self.view, 1)
+        body = QSplitter(Qt.Orientation.Horizontal); body.setChildrenCollapsible(False); body.setHandleWidth(14)   # drag the handle to give the preview more room
+        body.addWidget(scroll); body.addWidget(pcard); body.setStretchFactor(0, 5); body.setStretchFactor(1, 6); body.setSizes([620, 760])
         footer = QHBoxLayout(); footer.setSpacing(8)
         go = button("Continue to Publish"); go.clicked.connect(self.publish_requested)
         footer.addWidget(self.status, 1); footer.addWidget(self.save_btn); footer.addWidget(go)
-        v.addLayout(body, 1); v.addLayout(footer)
+        v.addWidget(body, 1); v.addLayout(footer)
 
         self._timer = QTimer(self); self._timer.setSingleShot(True); self._timer.setInterval(250)
         self._timer.timeout.connect(self._refresh_preview)
@@ -1922,6 +1990,9 @@ class TemplatePage(QWidget):
         self.selection.setText("No workflow selected yet: the preview shows a sample." if not names else
                                f"{len(names)} workflow(s): " + ", ".join(names[:5]) + (f" … and {len(names) - 5} more" if len(names) > 5 else ""))
         self._image_key = None
+        self.preview_pick.blockSignals(True)
+        self.preview_pick.clear(); self.preview_pick.addItems(names or ["Sample workflow"])
+        self.preview_pick.setVisible(len(names) > 1); self.preview_pick.blockSignals(False)
         self._load_screens()
         self._refresh_preview()
 
@@ -2053,8 +2124,21 @@ class TemplatePage(QWidget):
         self._populate(); self._save()
 
     # ---- preview and export ----
+    def _preview_wf(self):
+        i = self.preview_pick.currentIndex()
+        return self.workflows[i] if self.workflows and 0 <= i < len(self.workflows) else None
+
+    def _preview_link(self, url):
+        text = url.toString()
+        if text.startswith("#"):
+            self.view.scrollToAnchor(text[1:])
+        elif url.scheme() in ("http", "https"):
+            QDesktopServices.openUrl(url)
+
     def _refresh_preview(self):
-        t, wf = self.template, (self.workflows[0] if self.workflows else None)
+        """Build the page for the chosen workflow exactly as publishing does, and show it with the page hierarchy above it."""
+        t, wf = self.template, self._preview_wf()
+        site = self.client.site if self.client else ""
         image = None
         if wf is not None and t.flow and t.shows_png:
             key = (wf["id"], t.flow_width, t.flow_labels, t.flow_node_scale, t.flow_line_style, t.flow_color_style, t.flow_jira_pos)
@@ -2062,11 +2146,27 @@ class TemplatePage(QWidget):
                 try:
                     (self._image, self._image_px), self._image_key = render_workflow(wf, t.flow_width, t.flow_labels, t.flow_node_scale, 1,
                                                                                        t.flow_line_style == "curved", t.flow_color_style == "mono", t.flow_jira_pos), key
-                except Exception:
+                except Exception:   # a diagram that cannot be drawn must not blank the preview
                     self._image, self._image_px, self._image_key = None, 0, None
             image = self._image
-        self.mockup.set_template(t, wf, image, self.screen_cache, self.client.site if self.client else "", self._screen_note,
-                                 getattr(self, "_image_px", 0) if image is not None else 0)
+        shown = wf or SAMPLE
+        fid, assets, images = shown["id"][-8:], {}, {}
+        if t.flow and image is not None:
+            assets["png_name"], assets["png_width"] = f"workflow_{fid}.png", self._image_px
+            self.view.document().addResource(QTextDocument.ResourceType.ImageResource, QUrl(assets["png_name"]), image)
+            images[assets["png_name"]] = True
+        if t.flow and t.flow_format == "drawio":
+            assets["drawio_name"] = f"workflow_{fid}.drawio"
+        try:
+            body = build_storage(shown, raw_workflow_json(site, shown), assets, t, self.screen_cache, site)
+        except Exception as e:   # keep the page usable even if one element cannot be built
+            self.view.setHtml(f"<p style='color:#C50F1F'>The preview could not be built: {html.escape(str(e))}</p>")
+            return
+        title = page_title(shown["name"], t.title_prefix, t.title_prefix_on)
+        scroll = self.view.verticalScrollBar(); pos = scroll.value()
+        note = f"<p style='color:#6B778C'>{html.escape(self._screen_note)}</p>" if self._screen_note else ""
+        self.view.setHtml(hierarchy_html(t, self.workflows) + "<br>" + page_preview(t, body, title, images, site, max(300, self.view.viewport().width() - 70)) + note)
+        scroll.setValue(pos)
 
     def export_diagram(self):
         """Write the diagram of the first selected workflow the way the template says (PNG, or draw.io plus its PNG preview)."""
@@ -3034,12 +3134,12 @@ class LogsPage(QWidget):
         refresh = button("Refresh", primary=True); refresh.clicked.connect(self.reload)
         export = button("Export CSV"); export.clicked.connect(self.export_csv)
         opn = button("Open log file"); opn.clicked.connect(lambda: LOG_PATH.exists() and QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_PATH))))
-        bar = command_bar([], self.search, [opn, export, refresh])
+        controls = command_bar([], self.search, [opn, export, refresh])
         self.table = AutoFitTable(L_COLS)
         self.table.empty_text = "No changes recorded yet. The app writes an entry here whenever it changes your Jira or Confluence site."
         self.status = label("", "caption")
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(12)
-        v.addLayout(top); v.addLayout(bar); v.addWidget(self.table, 1); v.addWidget(self.status)
+        v.addLayout(top); v.addLayout(controls); v.addWidget(self.table, 1); v.addWidget(self.status)
         self.search.textChanged.connect(lambda _: self.fill())
         self.entries = []
 

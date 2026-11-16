@@ -24,6 +24,7 @@ from .confluence import REQUIRED_LABEL, ConfluenceError, ConflictError, clean_la
 from .page import build_storage
 from .api import JiraClient, JiraError, scheme_edit_url, screen_url, transition_url, workflow_edit_url
 from .flowchart import FlowchartView, has_jira_positions, render_workflow
+from .page import is_portal
 from .flowexport import to_drawio
 from .jobscript import (DIAGRAM_NOTICE, apply_template, can_export, describe_destination, describe_template, diagram_position, generate_script,
                         job_name, load_job, make_job, save_job, script_name)
@@ -253,7 +254,13 @@ class AutoFitTable(QTableWidget):
                 wd = self.cellWidget(r, c)
                 if wd is not None and wd.property("fit"):   # a cell widget that sizes itself: take the width it asks for
                     wd.ensurePolished()
-                    w = max(w, wd.sizeHint().width() + 8)
+                    need = wd.sizeHint().width()
+                    for lab in wd.findChildren(LinkLabel):   # a link's size hint was taken before the app font applied: measure its text here
+                        lines = lab.property("lines") or []
+                        text_w = max((fm.horizontalAdvance(line) for line in lines), default=0) + 8
+                        lab.setMinimumWidth(text_w)   # the layout may not give the link less than its text needs
+                        need += max(0, text_w - lab.sizeHint().width())
+                    w = max(w, need + 8)
                     continue
                 lines, pad = self._measure(r, c)
                 w = max(w, max((fm.horizontalAdvance(line) for line in lines), default=0) + pad)
@@ -323,6 +330,16 @@ def tag(text, color="brand_fg"):
     l = QLabel(text)
     l.setStyleSheet(f"background: {T['brand_tint']}; color: {T[color]}; border: 1px solid {T[color]}; border-radius: 9px; "
                     f"padding: 1px 8px; font-size: {max(12, T['px'] - 1)}px; font-weight: 600;")
+    return l
+
+
+def portal_tag():
+    """The small yellow "Portal" tag: a transition that customers can take in the Jira Service Management portal."""
+    l = QLabel("Portal")
+    fill, edge, text = ("#433519", "#8A6D00", "#FFD43B") if T["dark"] else ("#FFF4CE", "#C9A100", "#6B5200")
+    l.setStyleSheet(f"background: {fill}; color: {text}; border: 1px solid {edge}; border-radius: 9px; padding: 1px 8px; "
+                    f"font-size: {max(12, T['px'] - 1)}px; font-weight: 600;")
+    l.setToolTip("Customers can take this transition in the Jira Service Management portal")
     return l
 
 
@@ -675,13 +692,21 @@ class WorkflowViewer(QDialog):
         self.st.itemSelectionChanged.connect(self._status_selected)
 
         names = {s["id"]: s["name"] for s in wf["statuses"]}
-        self.tr = AutoFitTable(["ID", "TRANSITION", "FROM → TO", "SCREEN"])
+        self.tr = AutoFitTable(["ID", "TRANSITION", "FROM → TO", "SCREEN", "TRANSITION PROPERTIES"])
         for t in wf["transitions"]:
             src = ", ".join(names.get(f, f) for f in t["from"]) or ("Start" if t["type"] == "initial" else "Any status")
             r = self.tr.rowCount(); self.tr.insertRow(r)
             self.tr.setItem(r, 0, cell(t["id"]))
-            self.tr.setItem(r, 1, link_cell(t["name"] or f"Transition {t['id']}", transition_url(site, wf, t["id"]),
-                                            f"{t['name']}\nClick to open transition {t['id']} in Jira"))
+            link_text, link_tip = t["name"] or f"Transition {t['id']}", f"{t['name']}\nClick to open transition {t['id']} in Jira"
+            if is_portal(t):   # the link and a yellow Portal tag next to it
+                box = QWidget(); bl = QHBoxLayout(box); bl.setContentsMargins(0, 0, 8, 0); bl.setSpacing(8)
+                name_link = LinkLabel([(link_text, transition_url(site, wf, t["id"]))], link_tip, sep="<br>")
+                name_link.setWordWrap(False); bl.addWidget(name_link)
+                bl.addWidget(portal_tag(), alignment=Qt.AlignmentFlag.AlignVCenter); bl.addStretch()
+                box.setProperty("fit", True)
+                self.tr.setCellWidget(r, 1, box)
+            else:
+                self.tr.setItem(r, 1, link_cell(link_text, transition_url(site, wf, t["id"]), link_tip))
             to = names.get(t["to"], t["to"])
             self.tr.setItem(r, 2, cell(f"{src} → {to}", tip=f"{src} → {to}"))
             if t["screen_id"]:
@@ -689,6 +714,8 @@ class WorkflowViewer(QDialog):
                 self.tr.setItem(r, 3, link_cell(name, screen_url(site, t["screen_id"]), f"{name}\nClick to open screen {t['screen_id']} in Jira"))
             else:
                 self.tr.setItem(r, 3, cell("—", color=T["fg3"]))
+            props = "\n".join(f"{k} = {v}" if v != "" else k for k, v in sorted((t.get("properties") or {}).items()))
+            self.tr.setItem(r, 4, cell(props, tip=props) if props else cell("—", color=T["fg3"]))
             self.tr.item(r, 0).setData(Qt.ItemDataRole.UserRole, t["id"])
         self.tr.itemSelectionChanged.connect(self._transition_selected)
 

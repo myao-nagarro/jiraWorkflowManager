@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QGraphicsItem, Q
 
 from .fluent import T, tokens
 from .layout import build_graph
+from .page import is_portal
 from .routing import GAP_X, route
 
 NODE_H = 54
@@ -146,8 +147,18 @@ def pill_text(name, tid):
     return f"{name or 'Transition'} · ID {tid}"
 
 
-def pill_width(text, icons=(False, False)):
-    return QFontMetricsF(_font(PILL_FONT)).horizontalAdvance(text) + 16 + 15 * sum(bool(i) for i in icons)
+PORTAL_FILL, PORTAL_TEXT = "#FFD43B", "#4D3B00"   # the yellow "Portal" tag: the transition is offered to customers in the JSM portal
+
+
+def portal_tag_width():
+    return QFontMetricsF(_font(PILL_FONT - 2, True)).horizontalAdvance("Portal") + 12
+
+
+def pill_width(text, icons=(False, False, False)):
+    """Width of a transition label: its text, the [bolt] / [tree] icons (the first two flags) and the yellow Portal tag (the third)."""
+    portal = len(icons) > 2 and icons[2]
+    return (QFontMetricsF(_font(PILL_FONT)).horizontalAdvance(text) + 16 + 15 * sum(bool(i) for i in icons[:2])
+            + (portal_tag_width() + 6 if portal else 0))
 
 
 def make_pill(text, icons, category, view, tid):
@@ -163,6 +174,13 @@ def make_pill(text, icons, category, view, tid):
         if flag:
             ic = make(x, 0, dark); ic.setParentItem(pill); ic.setPos(0, -6.5); x += 15
     t.setPos(x, -tb.height() / 2)
+    if len(icons) > 2 and icons[2]:   # the yellow Portal tag at the end of the label
+        bw, bh = portal_tag_width(), PILL_H - 8
+        badge = QPainterPath(); badge.addRoundedRect(QRectF(x + tb.width() + 6, -bh / 2, bw, bh), bh / 2, bh / 2)
+        b = QGraphicsPathItem(badge, pill); b.setPen(QPen(Qt.PenStyle.NoPen)); b.setBrush(QBrush(QColor(PORTAL_FILL)))
+        b.setToolTip("Customers can take this transition in the Jira Service Management portal")
+        bt = QGraphicsSimpleTextItem("Portal", b); bt.setFont(_font(PILL_FONT - 2, True)); bt.setBrush(QColor(PORTAL_TEXT))
+        btb = bt.boundingRect(); bt.setPos(x + tb.width() + 6 + (bw - btb.width()) / 2, -btb.height() / 2)
     box = QRectF(-w / 2, -PILL_H / 2, w, PILL_H)
     p = QPainterPath(); p.addRoundedRect(box, PILL_H / 2, PILL_H / 2)
     pill.setPath(p); fill, border = _status_colors(category, view.mono)
@@ -246,7 +264,7 @@ class EdgeItem:
 
         self.labels = []
         for k, m in enumerate(self.members):   # the two directions of a pair are stacked across the line, both on it
-            pill, _ = make_pill(pill_text(m.name, m.tid), icons.get(m.tid, (False, False)),
+            pill, _ = make_pill(pill_text(m.name, m.tid), icons.get(m.tid, (False, False, False)),
                                 view._layout[0].nodes[m.dst].category, view, m.tid)
             off = (k - (len(self.members) - 1) / 2) * PILL_H
             pill.setPos(label_pos[0] + (off if turned else 0), label_pos[1] + (0 if turned else off))
@@ -311,7 +329,7 @@ class AnyTag:
         arrow = QGraphicsPathItem(ah); arrow.setPen(QPen(_line_color(), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)); arrow.setZValue(1)
         self.items, self.labels = [b, line, arrow], []
         for i, e in enumerate(edges):  # pills stacked to the left of the badge
-            pill, w = make_pill(pill_text(e.name, e.tid), icons.get(e.tid, (False, False)),
+            pill, w = make_pill(pill_text(e.name, e.tid), icons.get(e.tid, (False, False, False)),
                                 view._layout[0].nodes[e.dst].category, view, e.tid)
             pill.setPos(badge.left() - 8 - w / 2, badge.center().y() - i * (PILL_H + 4))
             pill.setToolTip(f"Transition ID {e.tid}: {e.name} (from any status)")
@@ -399,14 +417,14 @@ def compute_layout(wf: dict, extra_width: int = 0, node_scale: float = 1.0, use_
     g = build_graph(wf)
     crowd = len(g.edges) / max(1, len(g.nodes))   # transitions per box: many lines need wide gaps, few lines do not
     spread = max(auto_spread(max(g.layer_sizes.values(), default=1)), min(MAX_SPREAD, max(1.0, (crowd - 1) * 1.5))) * (1 + extra_width / 100)
-    icons = {t["id"]: (t.get("bolt", False), t.get("tree", False)) for t in wf["transitions"]}
+    icons = {t["id"]: (t.get("bolt", False), t.get("tree", False), is_portal(t)) for t in wf["transitions"]}   # bolt, tree, Portal tag
     fm = QFontMetricsF(_font(12 * node_scale, True))
     ns = node_scale
     size = {n.id: (44 * ns, 44 * ns) if n.kind == "start"
             else (max(120 * ns, min(240 * ns, fm.horizontalAdvance(n.label.upper()) + 40 * ns)), NODE_H * ns)
             for n in g.nodes.values()}
     def pill_w(e):
-        return pill_width(pill_text(e.name, e.tid), icons.get(e.tid, (False, False)))
+        return pill_width(pill_text(e.name, e.tid), icons.get(e.tid, (False, False, False)))
 
     sizes = [(max(pill_w(m) for m in [e, *e.also]), PILL_H * (1 + len(e.also))) for e in g.edges]
     tags = {d: [(pill_w(e), PILL_H) for e in es] for d, es in g.global_in.items()}

@@ -95,7 +95,10 @@ A pop-up with the flowchart of one workflow and its tables.
 - Labels are small, sit on their own line, are horizontal when there is room and turn along the line when not, and
   never touch other lines, statuses or labels.
 - **Save PNG** saves the diagram; **Edit in Jira** opens the workflow editor.
-- Tabs **Statuses** (ID, status, category, properties) and **Transitions** (ID, name with link, From → To, screen with link).
+- Tabs **Statuses** (ID, status, category, properties) and **Transitions** (ID, name with link, From → To, screen with link,
+  transition properties). A transition that customers can take in the Jira Service Management portal (property
+  `servicedesk.customer.transition.active = true`) carries a yellow **Portal** tag next to its name, and the same tag is drawn at
+  the end of its label in the flowchart, the PNG, and the draw.io diagram.
   Selecting in the chart selects the table row and the other way round.
 
 ## 4. Schemas (workflow schemes)

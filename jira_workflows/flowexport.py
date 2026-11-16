@@ -10,7 +10,7 @@ LINE = "#707070"
 
 def to_drawio(wf: dict, extra_width: int = 0, labels: bool = False, node_scale: int = 100, curved: bool = False, mono: bool = False, use_jira: bool = False) -> str:
     """An uncompressed draw.io (mxfile) document with the statuses and the transitions of a workflow."""
-    g, _, rects, routes = compute_layout(wf, extra_width, node_scale / 100, use_jira)
+    g, icons, rects, routes = compute_layout(wf, extra_width, node_scale / 100, use_jira)
     cells, ids = [], {}
 
     def new_id(prefix="c"):
@@ -37,7 +37,7 @@ def to_drawio(wf: dict, extra_width: int = 0, labels: bool = False, node_scale: 
     for e, pts, _pos, _turned in routes:
         members = [e, *e.also]
         start_arrow = "startArrow=open;startFill=0;" if e.also else ""
-        label = "" if not labels else " / ".join(f"{m.name or 'Transition'} · ID {m.tid}" for m in members)
+        label = "" if not labels else " / ".join(f"{m.name or 'Transition'} · ID {m.tid}" + (" · Portal" if icons.get(m.tid, (0, 0, False))[2] else "") for m in members)
         mid = "".join(f'<mxPoint x="{x:.0f}" y="{y:.0f}"/>' for x, y in pts[1:-1])
         cells.append(f'<mxCell id="{new_id("e")}" value={quoteattr(escape(label))} style="endArrow=open;endFill=0;{start_arrow}html=1;rounded=0;{'curved=1;' if curved else ''}'
                      f'strokeColor={LINE};strokeWidth=2;fontSize=11;labelBackgroundColor=#FFFFFF;edgeStyle=none;" edge="1" parent="1">'

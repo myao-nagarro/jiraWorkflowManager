@@ -217,22 +217,6 @@ class JiraClient:
                 pass
             raise JiraError(msg or f"Jira returned {r.status_code}.", r.status_code)
 
-    def delete_status(self, status: dict):
-        """Delete one status that no workflow uses."""
-        if status.get("workflows"):
-            raise JiraError("A status that is used by a workflow cannot be deleted.")
-        r = self._request("DELETE", "/rest/api/3/statuses", params=[("id", status["id"])])
-        if r.status_code in (401, 403):
-            raise JiraError("Not allowed to delete statuses (Administer Jira permission required).", r.status_code)
-        if r.status_code not in (200, 204):
-            msg = ""
-            try:
-                body = r.json()
-                msg = "; ".join(body.get("errorMessages", []) or [e.get("message", "") for e in body.get("errors", [])])
-            except (ValueError, AttributeError):
-                pass
-            raise JiraError(msg or f"Jira returned {r.status_code}.", r.status_code)
-
     def screen_tabs(self, screen_id) -> list:
         return self._json("GET", f"/rest/api/3/screens/{quote(str(screen_id), safe='')}/tabs", "read the screen tabs")
 

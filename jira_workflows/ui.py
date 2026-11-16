@@ -1367,8 +1367,8 @@ class SchemesPage(QWidget):
 
 
 # --------------------------------------------------------------------------- statuses
-S_COLS = ["", "", "STATUS", "STATUS ID", "CATEGORY", "MANAGED BY", "ASSOCIATED WORKFLOWS", "ASSOCIATED SPACES"]   # check box, expand arrow, ...
-S_KEYS = [lambda s: 0, lambda s: 0, lambda s: s["name"].lower(), lambda s: int(s["id"]) if s["id"].isdigit() else 0,
+S_COLS = ["", "STATUS", "STATUS ID", "CATEGORY", "MANAGED BY", "ASSOCIATED WORKFLOWS", "ASSOCIATED SPACES"]   # expand arrow, ...
+S_KEYS = [lambda s: 0, lambda s: s["name"].lower(), lambda s: int(s["id"]) if s["id"].isdigit() else 0,
           lambda s: CATEGORIES[s["category"]][1], lambda s: s["scope"], lambda s: len(s["workflows"]), lambda s: len(s["spaces"])]
 
 
@@ -1408,15 +1408,15 @@ def status_detail(st, what="status"):
 
 
 class StatusesPage(QWidget):
+    """Every status of the site with its tags, and the workflows and spaces that use it (a row opens to list them). Read only."""
     refresh_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.setObjectName("page")
-        self.client, self.me, self.catalog, self.shown, self.sort = None, {}, None, [], (3, True)   # by status ID, ascending
-        self.checked = set()   # IDs of the ticked statuses; only inactive statuses (no workflow) can be ticked
+        self.catalog, self.shown, self.sort = None, [], (2, True)   # by status ID, ascending
         top = QHBoxLayout()
-        top.addLayout(page_header("Statuses", "Every status of your site. Open a row to see the workflows and spaces that use it; statuses no workflow uses can be deleted."), 1)
+        top.addLayout(page_header("Statuses", "Every status of your site. Open a row to see the workflows and spaces that use it."), 1)
         self.category = QComboBox(); self.category.addItems(["All categories"] + [c[0] for c in CATEGORIES.values()])
         self.state_active, self.state_inactive = QRadioButton("Active"), QRadioButton("Inactive")
         self.state_active.setChecked(True)   # active: used by at least one workflow; inactive: used by none
@@ -1433,8 +1433,6 @@ class StatusesPage(QWidget):
         self.managed_company.setToolTip("Statuses shared by the whole site")
         self.managed_team.setToolTip("Statuses that belong to one space")
         self.search = QLineEdit(placeholderText="Search status name or ID"); self.search.setClearButtonEnabled(True)
-        self.delete_btn = button("Delete"); self.delete_btn.setProperty("danger", True); self.delete_btn.setMinimumWidth(116)  # room for "Delete (12)"
-        self.delete_btn.clicked.connect(self.delete_selected); self.delete_btn.setEnabled(False)
         refresh = button("Refresh", primary=True); refresh.clicked.connect(self.refresh_requested)
         filt = QHBoxLayout(); filt.setSpacing(10)
         filt.addWidget(label("Status", "field")); filt.addWidget(self.state_active); filt.addWidget(self.state_inactive)
@@ -1444,77 +1442,35 @@ class StatusesPage(QWidget):
         filt.addWidget(label("Managed by", "field"))
         for b in (self.managed_company, self.managed_team):
             filt.addWidget(b)
-        filt.addWidget(self.search, 1); filt.addWidget(self.delete_btn); filt.addWidget(refresh)
+        filt.addWidget(self.search, 1); filt.addWidget(refresh)
 
-        self.table = AutoFitTable(S_COLS, fixed={0: 56, 1: 40}, numeric=(6, 7))
+        self.table = AutoFitTable(S_COLS, fixed={0: 40}, numeric=(5, 6))
         self.expanded = set()   # IDs of the statuses whose row is open
         header = self.table.horizontalHeader()
         header.sectionClicked.connect(self._sort)
-        header.setSortIndicatorShown(True); header.setSortIndicator(3, Qt.SortOrder.AscendingOrder)
-        self.table.cellDoubleClicked.connect(lambda r, c: self._toggle_row(self._sid(r)) if c > 1 and self._sid(r) else None)
-        self.select_all = QCheckBox(header); self.select_all.setTristate(True)
-        self.select_all.setToolTip("Select all unused statuses shown (statuses with 0 associated workflows)")
-        self.select_all.clicked.connect(self._toggle_all)
-        header.sectionResized.connect(lambda *_: self._place_select_all())
-        header.geometriesChanged.connect(self._place_select_all)
+        header.setSortIndicatorShown(True); header.setSortIndicator(2, Qt.SortOrder.AscendingOrder)
+        self.table.cellDoubleClicked.connect(lambda r, c: self._toggle_row(self._sid(r)) if self._sid(r) else None)
         self.status = label("Sign in to load statuses.", "caption")
         v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(12)
         v.addLayout(top); v.addLayout(filt); v.addWidget(self.table, 1); v.addWidget(self.status)
         self.category.currentIndexChanged.connect(lambda _: self.fill())
-        self.managed_group.buttonToggled.connect(lambda *_: self._managed_changed())
-        self.state_group.buttonToggled.connect(lambda *_: self._managed_changed())
+        self.managed_group.buttonToggled.connect(lambda *_: self.fill())
+        self.state_group.buttonToggled.connect(lambda *_: self.fill())
         self.search.textChanged.connect(lambda _: self.fill())
-
-    def start(self, client, me):
-        self.client, self.me = client, me
 
     def set_catalog(self, catalog):
         self.catalog = catalog
-        unused = {s["id"] for s in catalog["statuses"] if not s["workflows"]}
-        self.checked &= unused
         self.fill()
 
     def reset(self):
-        self.client, self.catalog, self.shown = None, None, []
-        self.checked.clear(); self.table.setRowCount(0); self._sync(); self.status.setText("Sign in to load statuses.")
+        self.catalog, self.shown = None, []
+        self.table.setRowCount(0); self.status.setText("Sign in to load statuses.")
         self.table.empty_text = "Sign in to load your statuses."
-
-    def _managed_changed(self):
-        self.checked.clear()
-        self.fill()
-
-    # ---- selection: only statuses that no workflow uses ----
-    def _checkbox(self, st):
-        box = QWidget(); bl = QHBoxLayout(box); bl.setContentsMargins(0, 0, 0, 0)
-        cb = QCheckBox()
-        if st["workflows"]:
-            cb.setEnabled(False)
-            cb.setToolTip(f"Used by {len(st['workflows'])} workflow(s): a status that is in use cannot be deleted")
-        else:
-            cb.setChecked(st["id"] in self.checked)
-            cb.setToolTip("Select to delete (no workflow uses this status)")
-            cb.toggled.connect(lambda on, sid=st["id"]: self._set_checked(sid, on))
-        bl.addWidget(cb, alignment=Qt.AlignmentFlag.AlignCenter)
-        return box
-
-    def _set_checked(self, sid, on):
-        (self.checked.add if on else self.checked.discard)(sid)
-        self._sync()
-
-    def _toggle_all(self):
-        ids = {s["id"] for s in self.shown if not s["workflows"]}
-        self.checked = self.checked - ids if ids and ids <= self.checked else self.checked | ids
-        for r in range(self.table.rowCount()):
-            box = self.table.cellWidget(r, 0)
-            cb = box.findChild(QCheckBox) if box is not None and self._sid(r) else None
-            if cb is not None and cb.isEnabled():
-                cb.blockSignals(True); cb.setChecked(self._sid(r) in self.checked); cb.blockSignals(False)
-        self._sync()
 
     # ---- expanding a row ----
     def _sid(self, r):
         """The status ID of a status row (None for the open detail row below it)."""
-        w = self.table.cellWidget(r, 1)
+        w = self.table.cellWidget(r, 0)
         return w.property("sid") if w is not None else None
 
     def _arrow(self, sid):
@@ -1535,34 +1491,13 @@ class StatusesPage(QWidget):
             self.expanded.discard(sid); self.table.removeRow(r + 1)
         else:
             self.expanded.add(sid); self._insert_detail(r + 1, st)
-        self.table.setCellWidget(r, 1, self._arrow(sid))
+        self.table.setCellWidget(r, 0, self._arrow(sid))
         self.table.refit()
 
     def _insert_detail(self, r, st):
         self.table.insertRow(r)
         self.table.setSpan(r, 0, 1, self.table.columnCount())
         self.table.setCellWidget(r, 0, status_detail(st))
-
-    def _sync(self):
-        ids = {s["id"] for s in self.shown if not s["workflows"]}
-        n = len(ids & self.checked)
-        self.select_all.setEnabled(bool(ids))
-        self.select_all.setCheckState(Qt.CheckState.Unchecked if not n else
-                                      Qt.CheckState.Checked if n == len(ids) else Qt.CheckState.PartiallyChecked)
-        self.delete_btn.setText(f"Delete ({len(self.checked)})" if self.checked else "Delete")
-        self.delete_btn.setEnabled(bool(self.checked) and self.client is not None)
-        self.delete_btn.setToolTip("Delete the selected unused statuses" if self.checked
-                                   else "Choose Inactive and tick the statuses to delete (statuses with 0 associated workflows)" if self.state_active.isChecked()
-                                   else "Tick the unused statuses to delete")
-
-    def _place_select_all(self):
-        h = self.table.horizontalHeader()
-        sz = self.select_all.sizeHint()
-        self.select_all.move(h.sectionViewportPosition(0) + (h.sectionSize(0) - sz.width()) // 2, (h.height() - sz.height()) // 2)
-
-    def showEvent(self, e):
-        super().showEvent(e)
-        self._place_select_all()
 
     # ---- table ----
     def fill(self):
@@ -1582,80 +1517,29 @@ class StatusesPage(QWidget):
         for s in self.shown:
             r = self.table.rowCount(); self.table.insertRow(r)
             wf = s["workflows"]
-            self.table.setCellWidget(r, 0, self._checkbox(s))
-            self.table.setCellWidget(r, 1, self._arrow(s["id"]))
-            self.table.setCellWidget(r, 2, status_name_cell(s))
-            self.table.setItem(r, 3, cell(s["id"]))
-            self.table.setItem(r, 4, cell(CATEGORIES[s["category"]][0], color=T[CATEGORY_TOKEN[s["category"]]]))
+            self.table.setCellWidget(r, 0, self._arrow(s["id"]))
+            self.table.setCellWidget(r, 1, status_name_cell(s))
+            self.table.setItem(r, 2, cell(s["id"]))
+            self.table.setItem(r, 3, cell(CATEGORIES[s["category"]][0], color=T[CATEGORY_TOKEN[s["category"]]]))
             team = s["scope"] == "PROJECT"
-            self.table.setItem(r, 5, cell("Team-managed" + (f" · {spaces[s['project_id']]}" if s["project_id"] in spaces else "") if team
+            self.table.setItem(r, 4, cell("Team-managed" + (f" · {spaces[s['project_id']]}" if s["project_id"] in spaces else "") if team
                                           else "Company-managed", tip="Belongs to one space" if team else "Shared by the whole site"))
-            self.table.setItem(r, 6, cell(len(wf), True, tip="\n".join(wf[:30]) + (f"\n… +{len(wf) - 30} more" if len(wf) > 30 else "")
+            self.table.setItem(r, 5, cell(len(wf), True, tip="\n".join(wf[:30]) + (f"\n… +{len(wf) - 30} more" if len(wf) > 30 else "")
                                           or "Not used by any workflow"))
             sp = s["spaces"]
-            self.table.setItem(r, 7, cell(len(sp), True, tip=", ".join(sp[:40]) + (f" … +{len(sp) - 40} more" if len(sp) > 40 else "")
+            self.table.setItem(r, 6, cell(len(sp), True, tip=", ".join(sp[:40]) + (f" … +{len(sp) - 40} more" if len(sp) > 40 else "")
                                           or "Not used in any space"))
             if s["id"] in self.expanded:
                 self._insert_detail(r + 1, s)
         self.table.refit()
-        self._sync(); self._place_select_all()
-        self.status.setText(f"{len(self.shown)} of {len(self.catalog['statuses'])} statuses"
-                            + ("" if active else " · these statuses are not used by any workflow and can be deleted"))
+        self.status.setText(f"{len(self.shown)} of {len(self.catalog['statuses'])} statuses")
 
     def _sort(self, col):
-        if col < 2:
+        if col == 0:
             return
         self.sort = (col, not self.sort[1] if self.sort[0] == col else True)
         self.table.horizontalHeader().setSortIndicator(col, Qt.SortOrder.AscendingOrder if self.sort[1] else Qt.SortOrder.DescendingOrder)
         self.fill()
-
-    # ---- deleting unused statuses ----
-    def delete_selected(self):
-        chosen = [s for s in self.catalog["statuses"] if s["id"] in self.checked]
-        used = [s["name"] for s in chosen if s["workflows"]]
-
-        def bullets(names):
-            return "\n".join(f"• {n}" for n in names[:15]) + (f"\n… and {len(names) - 15} more" if len(names) > 15 else "")
-
-        if used or not chosen:  # cannot happen through the check boxes; kept as a guard
-            QMessageBox.warning(self, titlecase("Statuses in use"), "Only statuses without workflows can be deleted:\n\n" + bullets(used))
-            return
-        box = QMessageBox(QMessageBox.Icon.Warning, titlecase("Delete statuses"),
-                          f"Permanently delete {len(chosen)} unused status(es)?\n\n" + bullets([s["name"] for s in chosen]),
-                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, self)
-        box.setInformativeText("No workflow uses them. This cannot be undone.")
-        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-        if box.exec() != QMessageBox.StandardButton.Yes:
-            return
-        self.delete_btn.setEnabled(False)
-        client, me = self.client, self.me
-        who = f"{me.get('displayName', '')} <{me.get('emailAddress') or client.email}>".strip()
-
-        def job(progress):
-            failed = []
-            for i, s in enumerate(chosen):
-                progress(i, len(chosen), f"Deleting {s['name']}")
-                try:
-                    client.delete_status(s)
-                    log_change(client.site, who, "Delete status", s["name"], s["id"], "Success", "Deleted unused status")
-                except JiraError as e:
-                    failed.append(f"{s['name']}: {e}")
-                    log_change(client.site, who, "Delete status", s["name"], s["id"], "Failed", str(e))
-            return len(chosen) - len(failed), failed
-
-        self.w = Worker(job)
-        self.w.progress.connect(lambda a, b, m: self.status.setText(f"{m}…"))
-        self.w.failed.connect(lambda msg: (self.status.setText(msg), self._sync()))
-        self.w.done.connect(self._deleted)
-        self.w.start()
-
-    def _deleted(self, result):
-        ok, failed = result
-        self.checked.clear()
-        if failed:
-            QMessageBox.warning(self, titlecase("Some statuses were not deleted"), f"{ok} deleted, {len(failed)} failed:\n\n" + "\n".join(failed[:10]))
-        self.status.setText(f"{ok} status(es) deleted.")
-        self.refresh_requested.emit()
 
 
 # --------------------------------------------------------------------------- resolutions
@@ -3570,7 +3454,6 @@ class MainWindow(QMainWindow):
 
     def _logged_in(self, client, me):
         self.schemes.start(client, me)
-        self.statuses.start(client, me)
         self.template_page.set_client(client)
         self.publish_page.start(client, me)
         self.workflows.start(client, me)

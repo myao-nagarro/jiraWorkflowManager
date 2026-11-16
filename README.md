@@ -24,7 +24,7 @@ The app only does what the signed-in account may do. Scopes only *limit* what a 
 
 | Where | Needed for | Permission |
 |---|---|---|
-| Jira | Reading workflows, schemes, statuses, screens; deleting them | **Administer Jira** (global permission) |
+| Jira | Reading workflows, schemes, statuses, screens; deleting workflows and schemes | **Administer Jira** (global permission) |
 | Confluence | Publishing pages | View the parent page/folder and the space; **Add pages**, **Add attachments** and **Add labels** in that space; edit permission on the parent page (only to add the report) |
 
 ### OAuth 2.0 scopes of a service account
@@ -121,7 +121,7 @@ A pop-up with the flowchart of one workflow and its tables.
   Closed, Building, Build Broken, To Do, In Review, Done – recognised by their fixed IDs) and **JSM** for statuses that Jira Service
   Management created (the names of its project templates, such as Waiting for support, Waiting for customer, Pending, Escalated,
   Canceled, Under review, Completed; a status counts when a Jira Service Management workflow uses it or no workflow does).
-- Only statuses with **0** workflows can be ticked. **Delete** asks for confirmation and cannot be undone.
+- The page is read only: statuses cannot be selected or deleted in this app.
 
 ## 6. Resolutions
 
@@ -205,7 +205,7 @@ python publish_workflows_<name>.py -viewlog [last|all]
 
 ## 10. Logs
 
-Every change the app makes (delete workflow / scheme / status, publish page, add report) is appended to
+Every change the app makes (delete workflow / scheme, publish page, add report) is appended to
 `change_log.jsonl`: time, user, site, action, target, ID, result, details. The page shows them newest first with search,
 **Open log file**, **Export CSV** and **Refresh**. Reading data and exporting are not logged. The exported script has its own log.
 

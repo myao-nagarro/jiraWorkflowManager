@@ -36,7 +36,7 @@ class Graph:
     global_in: dict = field(default_factory=dict)   # status id -> global transitions ending there (drawn as tags)
 
 
-def build_graph(wf: dict) -> Graph:
+def build_graph(wf: dict, merge: bool = True) -> Graph:
     g = Graph()
     status_names = {s["id"]: s for s in wf["statuses"]}
 
@@ -61,7 +61,8 @@ def build_graph(wf: dict) -> Graph:
             if src not in (START, ANY):
                 need(src)
             g.edges.append(Edge(t["id"], t["name"], src, t["to"], t["type"]))
-    _merge_opposites(g)
+    if merge:
+        _merge_opposites(g)
     _layout(g)
     return g
 

@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QGraphicsItem, Q
                              QGraphicsSimpleTextItem, QGraphicsView, QHBoxLayout, QLabel, QPushButton)
 
 from .fluent import T, tokens
-from .layout import build_graph
+from .layout import START, build_graph
 from .page import is_portal
 from .routing import GAP_X, route
 
@@ -272,6 +272,23 @@ class EdgeItem:
                 pill.setRotation(-90)   # the text runs along the line
             pill.setToolTip(f"Transition ID {m.tid}: {m.name}")
             view.scene().addItem(pill); self.labels.append(pill)
+        self.leader = self._leader(pts, QPointF(*label_pos), view)
+
+    def _leader(self, pts, c, view):
+        """A fine dotted line from a label that had to move beside its line (the line is crowded) back to the line."""
+        best = None
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            px, py = min(max(c.x(), min(x0, x1)), max(x0, x1)), min(max(c.y(), min(y0, y1)), max(y0, y1))
+            d = math.hypot(c.x() - px, c.y() - py)
+            if best is None or d < best[0]:  # pylint: disable=unsubscriptable-object
+                best = (d, QPointF(px, py))
+        if best is None or best[0] < 16:   # still on the line
+            return None
+        path = QPainterPath(best[1]); path.lineTo(c)
+        it = QGraphicsPathItem(path)
+        it.setPen(QPen(self.base_color, 1.4, Qt.PenStyle.DotLine)); it.setZValue(2)
+        view.scene().addItem(it)
+        return it
 
     @staticmethod
     def _pen(color, width):
@@ -287,13 +304,18 @@ class EdgeItem:
         self.line.setZValue(3 if on else 1)
 
     def set_opacity(self, v):
-        for it in [self.line, *self.arrows, *self.labels]:
+        for it in [self.line, *self.arrows, *self.labels, *([self.leader] if self.leader else [])]:
             it.setOpacity(v)
 
     def set_labels(self, on, tid=None):
         """Show / hide the label pills. With a transition ID only that transition's pill (one direction of a two-way line)."""
+        shown = False
         for k, m in enumerate(self.members):
-            self.labels[k].setVisible(on and (tid is None or m.tid == tid))
+            vis = on and (tid is None or m.tid == tid)
+            self.labels[k].setVisible(vis)
+            shown = shown or vis
+        if self.leader:
+            self.leader.setVisible(shown)
 
     def show_direction(self, tid):
         """Two-way line: keep only the arrowhead of the selected transition (None: both heads)."""
@@ -373,6 +395,24 @@ def auto_spread(widest_row: int) -> float:
     return SPREAD_BY_ROW.get(widest_row, MAX_SPREAD)
 
 
+# Jira's eight ports around a box, clockwise from the top left: (side, share of the half side; the corner ports sit off the centre)
+JIRA_PORTS = {0: ("top", -0.6), 1: ("top", 0.0), 2: ("top", 0.6), 3: ("right", 0.0), 4: ("bottom", 0.6), 5: ("bottom", 0.0),
+              6: ("bottom", -0.6), 7: ("left", 0.0)}
+
+
+def jira_ports(wf: dict) -> dict:
+    """{(transition, source, target): (port at the source, port at the target)} as the Jira editor drew the lines; a port Jira did not
+    report is left out (None) and chosen by the router."""
+    out = {}
+    for t in wf["transitions"]:
+        for link in t.get("links") or []:
+            src = link.get("from") or (START if t["type"] == "initial" else None)
+            if src is None:
+                continue
+            out[(t["id"], src, t["to"])] = (JIRA_PORTS.get(link.get("from_port")) if link.get("from") else None, JIRA_PORTS.get(link.get("to_port")))
+    return out
+
+
 def has_jira_positions(wf: dict) -> bool:
     """Did Jira report where its editor draws the statuses (the current workflow API does, the legacy one does not)?"""
     return bool(wf.get("statuses")) and all(s.get("layout") for s in wf["statuses"])
@@ -381,9 +421,11 @@ def has_jira_positions(wf: dict) -> bool:
 def jira_positions(g, wf: dict, size: dict, extra_width: int, grow: float = 1.0):
     """Centres for the boxes from the X / Y values of the Jira editor, or None when they are not all known.
 
-    Jira's boxes are smaller than ours, so the whole drawing is enlarged just enough that no two boxes come closer than a gap that
-    leaves room for lines; `extra_width` stretches it sideways as the Width choice does. The Start circle uses Jira's start position,
-    or sits above the top status."""
+    Jira gives the top-left corner of each box, and Jira sizes a box by its text, so the centre of a box is the corner plus half of
+    that size: statuses that Jira stacks in one column then share a centre line and their lines run straight. Jira's boxes are
+    smaller than ours, so the whole drawing is enlarged just enough that no two boxes come closer than a gap that leaves room for
+    lines; `extra_width` stretches it sideways as the Width choice does. The Start circle uses Jira's start position, or sits
+    above the top status."""
     if not has_jira_positions(wf):
         return None
     pos = {s["id"]: s["layout"] for s in wf["statuses"]}
@@ -398,6 +440,21 @@ def jira_positions(g, wf: dict, size: dict, extra_width: int, grow: float = 1.0)
     ids = [n.id for n in g.nodes.values() if n.id in pos]
     if len(ids) != len(g.nodes):
         return None   # a node that is not a status or the start (an "any" marker) has no place of its own
+    fm = QFontMetricsF(_font(12, True))
+    for n in g.nodes.values():   # top-left corner -> centre, with the size Jira gives the box
+        jw, jh = (30.0, 30.0) if n.kind == "start" else (fm.horizontalAdvance(n.label.upper()) + 44, 34.0)
+        pos[n.id] = (pos[n.id][0] + jw / 2, pos[n.id][1] + jh / 2)
+    for axis in (0, 1):   # centres that Jira puts a few pixels apart are one column (or row): snap them so their lines run straight
+        order = sorted(ids, key=lambda i, axis=axis: pos[i][axis])
+        group = [order[0]]
+        for i in order[1:] + [None]:
+            if i is not None and pos[i][axis] - pos[group[-1]][axis] <= 10:
+                group.append(i)
+                continue
+            mean = sum(pos[k][axis] for k in group) / len(group)
+            for k in group:
+                pos[k] = (mean, pos[k][1]) if axis == 0 else (pos[k][0], mean)
+            group = [i] if i is not None else []
     gap_x, gap_y = 60, 52
     scale = 1.0
     while scale < 6:
@@ -429,12 +486,17 @@ def compute_layout(wf: dict, extra_width: int = 0, node_scale: float = 1.0, use_
     sizes = [(max(pill_w(m) for m in [e, *e.also]), PILL_H * (1 + len(e.also))) for e in g.edges]
     tags = {d: [(pill_w(e), PILL_H) for e in es] for d, es in g.global_in.items()}
     if use_jira and jira_positions(g, wf, size, extra_width):
-        # the statuses keep the places Jira gave them, enlarged evenly while a label cannot find room beside its line
+        # the statuses keep the places Jira gave them, enlarged evenly while a label cannot find room beside its line, and every line
+        # leaves and enters its boxes at the ports Jira used (so lines are not merged: each transition keeps its own)
+        g = build_graph(wf, merge=False)
+        sizes = [(pill_w(e), PILL_H) for e in g.edges]
+        forced = jira_ports(wf)
         best = None
-        for step in range(14):
+        # the statuses and lines stay exactly as in the Jira editor (nothing is enlarged for the labels: they find room by themselves)
+        for step in range(1):
             jira = jira_positions(g, wf, size, extra_width, 1 + 0.12 * step)
             for refine, wide in ((True, True), (False, False)):
-                rects, routes, bad = route(g, size, sizes, tags=tags, refine=refine, wide=wide, positions=jira)
+                rects, routes, bad = route(g, size, sizes, tags=tags, refine=refine, wide=wide, positions=jira, forced=forced, turn_labels=False)   # labels stay horizontal
                 if best is None or bad < best[2]:  # pylint: disable=unsubscriptable-object
                     best = (rects, routes, bad)
                 if bad == 0:
@@ -446,7 +508,7 @@ def compute_layout(wf: dict, extra_width: int = 0, node_scale: float = 1.0, use_
     for step in range(16):   # a label that cannot stay clear of other lines, boxes and labels asks for more room: wider, then taller
         for refine, wide in ((True, True), (False, False), (True, False), (False, True)):   # the full router has the fewest crossings; the plainer ones sometimes leave a label more room
             rects, routes, bad = route(g, size, sizes, gap_x=GAP_X * spread * (1 + 0.15 * step), tags=tags, row_boost=1 + 0.12 * step,
-                                       refine=refine, wide=wide)
+                                       refine=refine, wide=wide, turn_labels=not use_jira)   # with the Jira option on, labels stay horizontal also here
             if best is None or bad < best[2]:
                 best = (rects, routes, bad)
             if bad == 0:

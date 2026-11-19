@@ -106,6 +106,9 @@ def normalize_workflow(raw: dict, by_id: dict, by_ref: dict) -> dict:
                                                        + [resolve(l["fromStatusReference"]) for l in t.get("links") or []
                                                           if l.get("fromStatusReference")])),
                             "screen_id": screen_id, "screen_name": screen.get("name", ""), "resolutions": transition_resolutions(t),
+                            # where Jira's editor leaves the box of the source and enters the box of the target (ports 0-7), per source
+                            "links": [{"from": resolve(l["fromStatusReference"]) if l.get("fromStatusReference") else None,
+                                       "from_port": l.get("fromPort"), "to_port": l.get("toPort")} for l in t.get("links") or []],
                             "bolt": bool(t.get("actions") or t.get("triggers") or rules.get("postFunctions")),
                             "tree": bool(t.get("validators") or t.get("conditions") or rules.get("conditionsTree")
                                          or rules.get("validators"))})

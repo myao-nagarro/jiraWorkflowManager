@@ -9,16 +9,16 @@ from urllib.parse import urlparse
 
 from PyQt6.QtCore import QSettings, QBuffer, QEvent, QIODevice, QPoint, QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import (QColor, QDesktopServices, QFontDatabase, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPen, QPixmap,
-                         QShortcut, QTextDocument)
+                         QPalette, QShortcut, QTextDocument)
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QPlainTextEdit, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QGridLayout, QScrollArea, QTextBrowser,
     QProgressBar, QPushButton, QRadioButton, QSplitter, QStackedWidget,
-    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import APP_NAME, RELEASE_DATE, __version__, fluent
+from . import APP_NAME, RELEASE_DATE, __version__, fluent, helpdoc
 from .changelog import LOG_PATH, log_change, read_log
 from .confluence import REQUIRED_LABEL, ConfluenceError, ConflictError, clean_label, client_for, page_title, parse_target
 from .page import build_storage
@@ -774,7 +774,7 @@ class WorkflowViewer(QDialog):
         info = label(f"{len(wf['statuses'])} statuses · {len(wf['transitions'])} transitions · "
                      f"{'Active' if wf['active'] else 'Inactive'} · Space: {spaces} · Scheme: {schemes}", "caption")
 
-        self.st = AutoFitTable(["ID", "STATUS", "CATEGORY", "PROPERTIES"])
+        self.st = AutoFitTable(["ID", "STATUS", "CATEGORY", "STATUS PROPERTIES"])
         for s in sorted(wf["statuses"], key=lambda s: (CATEGORIES[s["category"]][1], s["name"].lower())):
             r = self.st.rowCount(); self.st.insertRow(r)
             self.st.setItem(r, 0, cell(s["id"])); self.st.setItem(r, 1, cell(s["name"], tip=s["name"]))
@@ -1227,10 +1227,12 @@ class WorkflowsPage(QWidget):
             return
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
             wr = csv.writer(f)
-            wr.writerow(["Workflow", "Workflow ID", "Spaces", "Workflow schemes", "Last updated", "Statuses", "Status properties", "Transition properties", "Transitions", "Transition screens", "State"])
+            wr.writerow(["Workflow", "Workflow ID", "Spaces", "Workflow schemes", "Last updated", "Statuses", "Status properties", "Transition properties",
+                         "Transitions", "Transition screens", "State"])
             for w in self.filtered:   # every workflow that matches the filters, not only the current page
                 wr.writerow([w["name"], w["id"], ", ".join(w["project_keys"]), ", ".join(s["name"] for s in w["schemes"]),
-                             w["updated"], len(w["statuses"]), w["property_count"], w["transition_property_count"], len(w["transitions"]), len(w["screens"]), "Active" if w["active"] else "Inactive"])
+                             w["updated"], len(w["statuses"]), w["property_count"], w["transition_property_count"], len(w["transitions"]),
+                             len(w["screens"]), "Active" if w["active"] else "Inactive"])
         self.status.setText(f"Exported {len(self.filtered)} workflows to {path}")
 
 
@@ -1859,8 +1861,6 @@ class TemplatePage(QWidget):
             head = QLabel(title.upper()); head.setProperty("role", "caption"); col.addWidget(head)
             for e in elems:
                 col.addWidget(self.boxes[e])
-                if e == "flow":
-                    sub = QVBoxLayout(); sub.setContentsMargins(26, 0, 0, 0); sub.addWidget(self.flow_jira); col.addLayout(sub)
                 if e == "details":
                     sub = QVBoxLayout(); sub.setContentsMargins(26, 0, 0, 0); sub.addWidget(self.details_full); col.addLayout(sub)
                 if e == "json":
@@ -1894,7 +1894,7 @@ class TemplatePage(QWidget):
                       "editable .drawio file; Confluence cannot show them directly, so a PNG preview is recommended.")
         self.w_lbl, self.f_lbl, self.q_lbl = label("Width", "caption"), label("Format", "caption"), label("Image Sharpness", "caption")
         r3 = QHBoxLayout(); r3.addWidget(self.w_lbl); r3.addWidget(self.width_combo)
-        r3.addSpacing(16); r3.addWidget(self.flow_labels); r3.addStretch(); l3.addLayout(r3)
+        r3.addSpacing(16); r3.addWidget(self.flow_labels); r3.addSpacing(16); r3.addWidget(self.flow_jira); r3.addStretch(); l3.addLayout(r3)
         r5 = QHBoxLayout(); r5.addWidget(self.n_lbl); r5.addWidget(self.node_combo); r5.addStretch(); l3.addLayout(r5)
         r6 = QHBoxLayout(); r6.addWidget(self.l_lbl); r6.addWidget(self.line_combo); r6.addSpacing(16)
         r6.addWidget(self.k_lbl); r6.addWidget(self.color_combo, 1); l3.addLayout(r6)
@@ -2048,8 +2048,7 @@ class TemplatePage(QWidget):
         for w in (self.code_collapse, self.code_lines):
             w.setEnabled(t.code_block)
         self.details_full.setEnabled(t.details)
-        self.flow_jira.setEnabled(t.flow)
-        diagram = (self.width_combo, self.flow_labels, self.flow_combo, self.w_lbl, self.f_lbl, self.node_combo, self.n_lbl,
+        diagram = (self.width_combo, self.flow_labels, self.flow_jira, self.flow_combo, self.w_lbl, self.f_lbl, self.node_combo, self.n_lbl,
                    self.line_combo, self.color_combo, self.l_lbl, self.k_lbl)
         for w in diagram:
             w.setEnabled(t.flow)
@@ -3345,6 +3344,9 @@ def nav_icon(kind, color) -> QIcon:
     elif kind == "schemes":
         for y in (6, 15, 24):
             p.drawRoundedRect(QRectF(7, y, 26, 9), 3, 3)
+    elif kind == "help":   # a question mark in a circle
+        p.drawEllipse(QRectF(6, 6, 28, 28)); p.drawArc(QRectF(15, 12, 10, 10), 160 * 16, -200 * 16)
+        p.drawLine(QPointF(20, 21), QPointF(20, 24)); p.drawPoint(QPointF(20, 28))
     elif kind == "settings":   # gear
         import math
         p.drawEllipse(QRectF(14, 14, 12, 12))
@@ -3427,11 +3429,148 @@ class SessionButton(QPushButton):
         super().leaveEvent(e)
 
 
+# --------------------------------------------------------------------------- help
+class HelpPage(QWidget):
+    """The Help page: the user guide (README.md) as topics. A list of topics with a search box on the left, the topic on the right with
+    its place in the guide, and Previous / Next to read on. Opening Help (F1) shows the topic of the page you came from."""
+    # page of the side bar -> the number of its section in the guide
+    CONTEXT = {"signin": 1, "workflows": 2, "schemes": 4, "statuses": 5, "resolutions": 6, "template": 7, "publish": 8, "job": 9, "logs": 10,
+               "settings": 11, "help": 12}
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("page")
+        self.topics = helpdoc.parse(helpdoc.load_text())
+        self.current, self.items = None, {}
+        self.search = QLineEdit(placeholderText="Search the help…"); self.search.setClearButtonEnabled(True)
+        self.search.setFixedWidth(280); self.search.textChanged.connect(self._filter)
+        trouble = button("Troubleshooting", subtle=True)
+        trouble.setToolTip("Something does not work? Go straight to the solutions.")
+        trouble.clicked.connect(lambda: self.open_title("Troubleshooting"))
+        head = QHBoxLayout()
+        head.addLayout(page_header("Help", "The user guide of the app. Press F1 on any page to open the help for it."), 1)
+        head.addWidget(trouble, 0, Qt.AlignmentFlag.AlignTop); head.addWidget(self.search, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.tree = QTreeWidget(); self.tree.setHeaderHidden(True); self.tree.setIndentation(16); self.tree.setUniformRowHeights(True)
+        self.tree.setMinimumWidth(230)
+        self.tree.currentItemChanged.connect(lambda cur, _prev: cur and self.show_topic(cur.data(0, Qt.ItemDataRole.UserRole)))
+        self.hits = label("", "caption")
+        left = QWidget(); lv = QVBoxLayout(left); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(4)
+        lv.addWidget(self.tree, 1); lv.addWidget(self.hits)
+
+        self.crumb = label("", "caption"); self.crumb.setWordWrap(False)
+        self.view = QTextBrowser(); self.view.setOpenLinks(False); self.view.setOpenExternalLinks(False)
+        self.view.anchorClicked.connect(self._link)
+        self.prev_btn, self.next_btn = button("← Previous"), button("Next →")
+        self.prev_btn.clicked.connect(lambda: self._step(-1)); self.next_btn.clicked.connect(lambda: self._step(1))
+        nav = QHBoxLayout(); nav.addWidget(self.prev_btn); nav.addStretch(); nav.addWidget(self.next_btn)
+        card = QFrame(); card.setObjectName("card")
+        cv = QVBoxLayout(card); cv.setContentsMargins(20, 14, 20, 14); cv.setSpacing(8)
+        cv.addWidget(self.crumb); cv.addWidget(self.view, 1); cv.addLayout(nav)
+
+        body = QSplitter(Qt.Orientation.Horizontal); body.setChildrenCollapsible(False); body.setHandleWidth(10)
+        body.addWidget(left); body.addWidget(card); body.setStretchFactor(0, 1); body.setStretchFactor(1, 4); body.setSizes([270, 900])
+        v = QVBoxLayout(self); v.setContentsMargins(28, 24, 28, 20); v.setSpacing(12)
+        v.addLayout(head); v.addWidget(body, 1)
+        self._fill_tree()
+        if self.topics:
+            self.show_topic(self.topics[0])
+        else:
+            self.view.setPlainText("The user guide (README.md) was not found next to the program.")
+
+    # ---- topics ----
+    def _fill_tree(self):
+        self.tree.blockSignals(True); self.tree.clear(); self.items = {}
+        for t in self.topics:
+            item = QTreeWidgetItem([t.title]); item.setData(0, Qt.ItemDataRole.UserRole, t); item.setToolTip(0, t.path)
+            if t.level == 3 and t.parent in self.items:
+                self.items[t.parent].addChild(item)
+            else:
+                self.tree.addTopLevelItem(item)
+            self.items[t.title] = item
+        self.tree.expandAll(); self.tree.blockSignals(False)
+
+    def open_for(self, key):
+        """Show the topic that explains a page of the app (the page Help was opened from)."""
+        step = self.CONTEXT.get(key)
+        topic = next((t for t in self.topics if step and t.title.startswith(f"{step}.")), None)
+        self.search.clear()
+        self.select(topic or (self.topics[0] if self.topics else None))
+
+    def open_title(self, title):
+        self.search.clear()
+        self.select(next((t for t in self.topics if t.title == title), None))
+
+    def select(self, topic):
+        if topic is not None and topic.title in self.items:
+            self.tree.setCurrentItem(self.items[topic.title])
+
+    def show_topic(self, topic):
+        """Show a topic: its text, its place in the guide and the Previous / Next buttons."""
+        if topic is None:
+            return
+        self.current = topic
+        md = f"# {topic.title}\n\n{topic.body}"
+        if topic.children:
+            md += "\n\n### In this section\n\n" + "\n".join(f"- [{c.title}](#{c.slug})" for c in topic.children)
+        self.view.setMarkdown(md)
+        self.crumb.setText(topic.path)
+        i = self.topics.index(topic)
+        before, after = (self.topics[i - 1] if i > 0 else None), (self.topics[i + 1] if i + 1 < len(self.topics) else None)
+        self.prev_btn.setEnabled(before is not None); self.next_btn.setEnabled(after is not None)
+        self.prev_btn.setText("← " + (before.title if before else "Previous")); self.next_btn.setText((after.title if after else "Next") + " →")
+        self.prev_btn.setToolTip(before.title if before else ""); self.next_btn.setToolTip(after.title if after else "")
+        query = self.search.text().strip()
+        if query:   # take the reader to the first place that matches
+            self.view.find(query.split()[0])
+        else:
+            self.view.verticalScrollBar().setValue(0)
+
+    def _step(self, d):
+        if self.current is not None:
+            j = self.topics.index(self.current) + d
+            if 0 <= j < len(self.topics):
+                self.select(self.topics[j])
+
+    def _filter(self, text):
+        """Search: only the topics that contain every word stay in the list."""
+        hits = helpdoc.search(self.topics, text)
+        found, query = {id(t) for t in hits}, text.strip()
+        for t in self.topics:
+            self.items[t.title].setHidden(bool(query) and id(t) not in found and not any(id(c) in found for c in t.children))
+        self.hits.setText(f"{len(hits)} topic(s) found" if query else "")
+        if query and hits:
+            self.select(hits[0])
+            self.show_topic(hits[0])   # again, now that the search words are known (to scroll to them)
+
+    def _link(self, url):
+        text = url.toString()
+        if text.startswith("#"):   # a link inside the guide
+            slug = text[1:]
+            topic = next((t for t in self.topics if t.slug == slug), None)
+            if topic is None:   # match the section number when the title changed
+                num = re.match(r"(\d+)-", slug)
+                topic = next((t for t in self.topics if num and t.slug.startswith(num.group(1) + "-")), None)
+            if topic is not None:
+                self.search.clear()
+                self.select(topic)
+        elif url.scheme() in ("http", "https"):
+            QDesktopServices.openUrl(url)
+
+    def apply_theme(self):
+        """Colors of the text and the links follow the theme."""
+        self.view.setStyleSheet(f"QTextBrowser {{ background: transparent; color: {T['fg1']}; border: none; "
+                                f"selection-background-color: {T['brand']}; selection-color: {T['on_brand']}; }}")
+        pal = self.view.palette(); pal.setColor(QPalette.ColorRole.Link, QColor(T["brand_fg"])); self.view.setPalette(pal)
+        if self.current is not None:
+            self.show_topic(self.current)
+
+
 class MainWindow(QMainWindow):
     NAV_GROUPS = {"workflows": "Inventory", "template": "Documentation", "logs": "Monitoring"}   # a heading above the first page of each group
     PAGE = {}   # nav key -> page index, filled below (so no number in this class has to be kept in step with the list)
     NAV = [("Sign In", "signin"), ("Workflows", "workflows"), ("Schemes", "schemes"), ("Statuses", "statuses"), ("Resolutions", "resolutions"), ("Template", "template"),
-           ("Publish", "publish"), ("Job", "job"), ("Logs", "logs"), ("Settings", "settings")]
+           ("Publish", "publish"), ("Job", "job"), ("Logs", "logs"), ("Help", "help"), ("Settings", "settings")]
 
     def __init__(self):
         super().__init__()
@@ -3443,11 +3582,12 @@ class MainWindow(QMainWindow):
         self.PAGE = {key: i for i, (_, key) in enumerate(self.NAV)}
         self.template_page, self.logs = TemplatePage(), LogsPage()
         self.settings_page = SettingsPage(self.ap)
+        self.help_page = HelpPage()
         self.publish_page = PublishPage(self.template_page)
         self.job_page = JobPage()
         self.stack = QStackedWidget()
         for p in (self.login, self.workflows, self.schemes, self.statuses, self.resolutions, self.template_page, self.publish_page, self.job_page, self.logs,
-                  self.settings_page):
+                  self.help_page, self.settings_page):
             self.stack.addWidget(p)
 
         self.side = QFrame(); self.side.setObjectName("sidebar"); self.side.setFixedWidth(220)
@@ -3459,16 +3599,16 @@ class MainWindow(QMainWindow):
         for i, (text, kind) in enumerate(self.NAV):
             b = QPushButton(text); b.setProperty("nav", True); b.setCheckable(True)
             b.setIconSize(QSize(20, 20)); b.setCursor(Qt.CursorShape.PointingHandCursor)
-            keys = f"Ctrl+{i + 1}" if i < 9 else "Ctrl+,"   # Ctrl+1 ... Ctrl+9, and Ctrl+, for the last page (Settings)
+            keys = {"help": "F1", "settings": "Ctrl+,"}.get(kind) or f"Ctrl+{i + 1}"   # Ctrl+1 ... Ctrl+9, F1 for Help, Ctrl+, for Settings
             b.setToolTip(f"{text}  ({keys})")
             self.group.addButton(b, i); self.nav_btns.append(b)
-            if text != "Settings":
+            if kind not in ("help", "settings"):   # these two sit at the bottom
                 if kind in self.NAV_GROUPS:
                     sv.addWidget(label(self.NAV_GROUPS[kind], "navgroup"))
                 sv.addWidget(b)
             QShortcut(QKeySequence(keys), self, activated=lambda i=i: self.nav_btns[i].isEnabled() and self.go(i))
         sv.addStretch()
-        sv.addWidget(self.nav_btns[-1])   # Settings sits at the bottom of the navigation pane
+        sv.addWidget(self.nav_btns[self.PAGE["help"]]); sv.addWidget(self.nav_btns[-1])   # Help and Settings sit at the bottom of the navigation pane
         sv.addSpacing(6)
         self.conn = label("Not signed in", "caption"); sv.addWidget(self.conn)
         self.session_btn = SessionButton(); self.session_btn.clicked.connect(QApplication.quit); self.session_btn.hide()
@@ -3557,11 +3697,15 @@ class MainWindow(QMainWindow):
         self.session_btn.set_icons(nav_icon("signin", t["fg1"]), nav_icon("exit", t["danger"]))
         self.workflows.apply_filter(); self.schemes.apply_filter(); self.statuses.fill(); self.resolutions.fill()
         self.login.steps.restyle()
+        self.help_page.apply_theme()
         for panel in self.findChildren(ScopesPanel):
             panel.restyle()
 
     def go(self, i):
+        came_from = self.NAV[self.stack.currentIndex()][1]
         self.stack.setCurrentIndex(i); self.nav_btns[i].setChecked(True)
+        if i == self.PAGE["help"] and came_from != "help":   # Help opens at the topic of the page it was opened from
+            self.help_page.open_for(came_from)
         if i == self.PAGE["publish"]:
             self.publish_page.refresh()
 

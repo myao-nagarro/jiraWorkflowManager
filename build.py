@@ -65,6 +65,7 @@ def main():
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
         "--name", EXE_NAME, "--version-file", str(version_file()), "--icon", str(make_icon()),
         "--specpath", str(ROOT / "build"),
+        "--add-data", f"{ROOT / 'README.md'}{os.pathsep}.",   # the Help page reads the user guide
         "--add-data", f"{ROOT / 'jira_workflows'}{os.pathsep}jira_workflows",   # sources the generated job script bundles (jobscript.py)
         "--exclude-module", "tkinter", "--exclude-module", "qfluentwidgets",
         "--exclude-module", "PyQt6.QtWebEngineCore", "--exclude-module", "PyQt6.QtQml", "--exclude-module", "PyQt6.QtQuick",

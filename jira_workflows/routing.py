@@ -5,13 +5,14 @@ is then routed on its own: it may leave and enter a box on any of its four sides
 route with the fewest turns that does not run through another box, preferring straight lines, then single
 turns (L), then two turns (Z / C). Routes that cross or overlap earlier ones cost extra.
 """
+import math
 from collections import defaultdict
 
 GAP_X, MIN_PORT_GAP, CLEAR, KEEP_AWAY = 110, 9, 8, 28   # CLEAR: never closer; KEEP_AWAY: preferred distance to other boxes
 DIRS = {"top": (0, -1), "bottom": (0, 1), "left": (-1, 0), "right": (1, 0)}
 
 
-def route(g, size: dict, label_size=None, gap_x=GAP_X, tags=None, row_boost=1.0, refine=True, wide=True, positions=None):
+def route(g, size: dict, label_size=None, gap_x=GAP_X, tags=None, row_boost=1.0, refine=True, wide=True, positions=None, forced=None, turn_labels=True):
     """size: node id -> (width, height). Returns (rects, routes, bad); `bad` counts the labels that could not be kept clear of
     other lines, boxes and labels (the caller can then ask for more room: wider gaps, `row_boost` > 1 for taller rows).
 
@@ -52,7 +53,7 @@ def route(g, size: dict, label_size=None, gap_x=GAP_X, tags=None, row_boost=1.0,
 
     if positions:   # fixed places (the Jira editor's): the boxes are centred on them
         rects = {n.id: (positions[n.id][0] - size[n.id][0] / 2, positions[n.id][1] - size[n.id][1] / 2, *size[n.id]) for n in nodes.values()}
-    routes = _Router(g, rects, refine, wide).run()
+    routes = _Router(g, rects, refine, wide, forced).run()
 
     # labels last, so each can dodge the boxes and the labels placed before it
     placed = list(rects.values())
@@ -66,7 +67,7 @@ def route(g, size: dict, label_size=None, gap_x=GAP_X, tags=None, row_boost=1.0,
     for k, (e, pts) in enumerate(routes):
         lw, lh = label_size[k] if label_size else (120, 20)
         others = [seg for j, (_, p2) in enumerate(routes) if j != k for seg in zip(p2, p2[1:])]   # every other line
-        pos, turned, cost = _label_pos(pts, lw, lh, placed, others)
+        pos, turned, cost = _label_pos(pts, lw, lh, placed, others, turn_labels)
         bad += cost >= 5000
         placed.append(label_box(pos, lw, lh, turned))
         out.append((e, pts, pos, turned))
@@ -170,8 +171,10 @@ def _score_vs(segs, placed):
 
 
 class _Router:
-    def __init__(self, g, rects, refine=True, wide=True):
+    def __init__(self, g, rects, refine=True, wide=True, forced=None):
         self.g, self.rects, self.refine = g, rects, refine
+        self.mirror = {}   # (source, target) -> (points, source port, target port, forced ports) of the lines routed with Jira's ports
+        self.forced, self._cur = forced or {}, None   # (transition, source, target) -> the ports Jira used: ((side, share) | None, (side, share) | None)
         self.c_side, self.c_top = (C_SIDE, C_TOP) if wide else (C_SIDE[:2], C_TOP[:2])   # outer lanes of C-shaped routes
         self.used = defaultdict(list)      # (node, side) -> port offsets already taken
         self.placed = []                   # routed segments
@@ -183,6 +186,24 @@ class _Router:
     # -- ports ------------------------------------------------------
     def free(self, nid, side, off):
         return all(abs(off - u) >= MIN_PORT_GAP for u in self.used[(nid, side)])
+
+    def choices(self, nid, side, which):
+        """The port offsets to try on a side: only Jira's own port when the line has one, else the next free one."""
+        if self._cur and self._cur[which]:
+            half = (self.rects[nid][2] if side in ("top", "bottom") else self.rects[nid][3]) / 2 - 9
+            return [self._cur[which][1] * half]
+        return self.slots(nid, side, 1)
+
+    def fits(self, nid, side, off, which):
+        """May a straight line use this offset? Jira's port, or the centre when the side is still free."""
+        if self._cur and self._cur[which]:
+            half = (self.rects[nid][2] if side in ("top", "bottom") else self.rects[nid][3]) / 2 - 9
+            return abs(off - self._cur[which][1] * half) < 1
+        return self.centred(nid, side, off)
+
+    def centred(self, nid, side, off):
+        """A port that is free, and the first line on a side leaves or enters at the centre of that side."""
+        return self.free(nid, side, off) and (bool(self.used[(nid, side)]) or abs(off) < 1)
 
     def slots(self, nid, side, count):
         """The next free port(s) on a side, in order: the middle, then half way to either end, then ever finer."""
@@ -209,6 +230,8 @@ class _Router:
         acy, bcy = A[1] + A[3] / 2, B[1] + B[3] / 2
         for sa, da in DIRS.items():
             for sb, nb in DIRS.items():
+                if self._cur and ((self._cur[0] and sa != self._cur[0][0]) or (self._cur[1] and sb != self._cur[1][0])):
+                    continue
                 arrive = (-nb[0], -nb[1])
                 va, vb = sa in ("top", "bottom"), sb in ("top", "bottom")
                 if va and vb:
@@ -218,12 +241,12 @@ class _Router:
                             continue
                         lo, hi = max(A[0], B[0]) + 9, min(A[0] + A[2], B[0] + B[2]) - 9
                         for x in dict.fromkeys([acx, bcx, (lo + hi) / 2]):   # a straight line fits where the boxes overlap
-                            if lo <= x <= hi and self.free(a, sa, x - acx) and self.free(b, sb, x - bcx):
+                            if lo <= x <= hi and self.fits(a, sa, x - acx, 0) and self.fits(b, sb, x - bcx, 1):
                                 yield [(x, ya), (x, yb)], (sa, x - acx), (sb, x - bcx)
                         mids = [(ya + yb) / 2, ya + 36 * da[1], yb - 36 * da[1], ya + 64 * da[1], yb - 64 * da[1]]
                         mids += [mids[0] + k * PARALLEL_SEP for k in (-3, -2, -1, 1, 2, 3)]   # alternative channels, so parallel runs can keep apart
-                        for oa in self.slots(a, sa, 1):
-                            for ob in self.slots(b, sb, 1):
+                        for oa in self.choices(a, sa, 0):
+                            for ob in self.choices(b, sb, 1):
                                 xa, xb = acx + oa, bcx + ob
                                 if abs(xa - xb) < 1:                   # ports line up: a straight line
                                     yield [(xa, ya), (xa, yb)], (sa, oa), (sb, ob)
@@ -234,8 +257,8 @@ class _Router:
                     elif sa == sb:                                     # both on the same side: go round (C shape)
                         for d in self.c_top:
                             m = (max(ya, yb) + d) if da[1] > 0 else (min(ya, yb) - d)
-                            for oa in self.slots(a, sa, 1):
-                                for ob in self.slots(b, sb, 1):
+                            for oa in self.choices(a, sa, 0):
+                                for ob in self.choices(b, sb, 1):
                                     yield [(acx + oa, ya), (acx + oa, m), (bcx + ob, m), (bcx + ob, yb)], (sa, oa), (sb, ob)
                 elif not va and not vb:
                     xa, xb = self.point(a, sa, 0)[0], self.point(b, sb, 0)[0]
@@ -244,12 +267,12 @@ class _Router:
                             continue
                         lo, hi = max(A[1], B[1]) + 9, min(A[1] + A[3], B[1] + B[3]) - 9
                         for y in dict.fromkeys([acy, bcy, (lo + hi) / 2]):
-                            if lo <= y <= hi and self.free(a, sa, y - acy) and self.free(b, sb, y - bcy):
+                            if lo <= y <= hi and self.fits(a, sa, y - acy, 0) and self.fits(b, sb, y - bcy, 1):
                                 yield [(xa, y), (xb, y)], (sa, y - acy), (sb, y - bcy)
                         mids = [(xa + xb) / 2, xa + 40 * da[0], xb - 40 * da[0], xa + 70 * da[0], xb - 70 * da[0]]
                         mids += [mids[0] + k * PARALLEL_SEP for k in (-3, -2, -1, 1, 2, 3)]
-                        for oa in self.slots(a, sa, 1):
-                            for ob in self.slots(b, sb, 1):
+                        for oa in self.choices(a, sa, 0):
+                            for ob in self.choices(b, sb, 1):
                                 ya_, yb_ = acy + oa, bcy + ob
                                 if abs(ya_ - yb_) < 1:
                                     yield [(xa, ya_), (xb, ya_)], (sa, oa), (sb, ob)
@@ -260,20 +283,20 @@ class _Router:
                     elif sa == sb:
                         for d in self.c_side:
                             m = (max(xa, xb) + d) if da[0] > 0 else (min(xa, xb) - d)
-                            for oa in self.slots(a, sa, 1):
-                                for ob in self.slots(b, sb, 1):
+                            for oa in self.choices(a, sa, 0):
+                                for ob in self.choices(b, sb, 1):
                                     yield [(xa, acy + oa), (m, acy + oa), (m, bcy + ob), (xb, bcy + ob)], (sa, oa), (sb, ob)
                 elif va:                                               # leave vertically, arrive sideways: one turn
                     ya, xb = self.point(a, sa, 0)[1], self.point(b, sb, 0)[0]
-                    for oa in self.slots(a, sa, 1):
-                        for ob in self.slots(b, sb, 1):
+                    for oa in self.choices(a, sa, 0):
+                        for ob in self.choices(b, sb, 1):
                             xa, yb = acx + oa, bcy + ob
                             if (yb - ya) * da[1] > 14 and (xb - xa) * arrive[0] > 14:
                                 yield [(xa, ya), (xa, yb), (xb, yb)], (sa, oa), (sb, ob)
                 else:                                                  # leave sideways, arrive vertically: one turn
                     xa, yb = self.point(a, sa, 0)[0], self.point(b, sb, 0)[1]
-                    for oa in self.slots(a, sa, 1):
-                        for ob in self.slots(b, sb, 1):
+                    for oa in self.choices(a, sa, 0):
+                        for ob in self.choices(b, sb, 1):
                             ya, xb = acy + oa, bcx + ob
                             if (xb - xa) * da[0] > 14 and (yb - ya) * arrive[1] > 14:
                                 yield [(xa, ya), (xb, ya), (xb, yb)], (sa, oa), (sb, ob)
@@ -301,7 +324,7 @@ class _Router:
         done, self.rec = {}, {}
         for i, e in sorted((x for x in edges if x[1].src != x[1].dst), key=span):  # short links first: they get the straight lines
             done[i] = self.route_edge(e, i)
-        if self.refine:
+        if self.refine and not self.forced:   # Jira's ports fix the lines: a second pass would pull twin lines apart
             self.reroute(edges, done)
         for i, e in edges:
             if e.src == e.dst:
@@ -318,6 +341,13 @@ class _Router:
 
     def route_edge(self, e, i=None):
         best = None
+        self._cur = self.forced.get((e.tid, e.src, e.dst))
+        twin = self.mirror.get((e.dst, e.src))
+        if twin and self._cur and self._cur[0] and self._cur[1] and twin[3] == (self._cur[1], self._cur[0]):
+            # the opposite transition left and entered through the same ports: Jira draws one line with a head at both ends
+            pts = list(reversed(twin[0]))
+            self.commit(i, e, pts, twin[2], twin[1])
+            return _simplify(pts)
         for pts, sa, sb in self.candidates(e.src, e.dst):
             if self.blocked(pts, {e.src, e.dst}):
                 continue
@@ -328,6 +358,8 @@ class _Router:
             return self.lane_route(e)
         _, pts, sa, sb = best
         self.commit(i, e, pts, sa, sb)
+        if self._cur:
+            self.mirror[(e.src, e.dst)] = (pts, sa, sb, self._cur)
         return _simplify(pts)
 
     def commit(self, i, e, pts, sa, sb):
@@ -357,6 +389,7 @@ class _Router:
                 old = self.uncommit(i, e)
                 old_score = self.score(*old[:1], old[1], old[2], e)
                 best = None
+                self._cur = self.forced.get((e.tid, e.src, e.dst))
                 for pts, sa, sb in self.candidates(e.src, e.dst):
                     if self.blocked(pts, {e.src, e.dst}):
                         continue
@@ -409,7 +442,7 @@ def label_box(c, w, h, turned):
     return (c[0] - bw / 2, c[1] - bh / 2, bw, bh)
 
 
-def _label_pos(pts, w, h, placed, others=()):
+def _label_pos(pts, w, h, placed, others=(), turn=True):
     """Centre of a label of w x h sitting ON its own line, and whether it is turned (reads bottom to top).
 
     Rules, in order of importance:
@@ -426,7 +459,7 @@ def _label_pos(pts, w, h, placed, others=()):
         if length < 0.01:
             continue
         own = [sg for j, sg in enumerate(segs) if j != i]
-        for turned in (False, True):
+        for turned in ((False, True) if turn else (False,)):   # a label is turned only when that is allowed
             bw, bh = (h, w) if turned else (w, h)
             along = (bh if seg_vertical else bw) / 2     # half the label's extent measured along this stretch
             for step in range(1, 40):
@@ -451,5 +484,17 @@ def _label_pos(pts, w, h, placed, others=()):
                     best = (cost, c, turned)
     if best:
         return best[1], best[2], best[0]
+    # no free place on the line itself (many transitions share one stretch): the nearest free place beside it, joined to the line by a
+    # dotted leader, so labels never lie on top of a box or of each other
+    mid = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in segs] + [p for sg in segs for p in sg]
+    for radius in range(14, 400, 14):
+        for px0, py0 in mid:
+            for k in range(16):
+                ang = k * math.pi / 8
+                c = (px0 + radius * math.cos(ang), py0 + radius * math.sin(ang))
+                box = label_box(c, w, h, False)
+                if not any(box[0] - 3 < px + pw and px < box[0] + box[2] + 3 and box[1] - 3 < py + ph and py < box[1] + box[3] + 3
+                           for px, py, pw, ph in placed):
+                    return c, False, 9000
     (x0, y0), (x1, y1) = segs[order[0]]
     return ((x0 + x1) / 2, (y0 + y1) / 2), False, 9999

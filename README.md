@@ -7,8 +7,8 @@ self-contained script that a server can run on a schedule.
 - [Requirements](#requirements) · [Permissions and scopes](#permissions-and-scopes) · [Getting started](#getting-started)
 - Step by step: [1 Sign in](#1-sign-in) · [2 Workflows](#2-workflows) · [3 Workflow viewer](#3-workflow-viewer) ·
   [4 Schemes](#4-schemes-workflow-schemes) · [5 Statuses](#5-statuses) · [6 Resolutions](#6-resolutions) · [7 Template](#7-template) ·
-  [8 Publish](#8-publish) · [9 Job](#9-job-and-the-generated-script) · [10 Logs](#10-logs) · [11 Settings](#11-settings)
-- [Keyboard shortcuts](#keyboard-shortcuts) · [Files the app writes](#files-the-app-writes) · [Build](#build-the-executable)
+  [8 Publish](#8-publish) · [9 Job](#9-job-and-the-generated-script) · [10 Logs](#10-logs) · [11 Settings](#11-settings) · [12 Help](#12-help)
+- [Troubleshooting](#troubleshooting) · [What's new](#whats-new) · [Keyboard shortcuts](#keyboard-shortcuts) · [Files the app writes](#files-the-app-writes) · [Build](#build-the-executable)
 
 ## Requirements
 
@@ -93,13 +93,20 @@ A pop-up with the flowchart of one workflow and its tables.
   transition to lock the view (others dim; both directions of a two-way line are told apart). **Reset view**, `Esc` or
   `Ctrl+0` release it. The mouse wheel zooms; **−**, **+**, **Fit**, **100%** also zoom. Transitions from any status get an *Any* tag.
 - **Width**: Default, +25 % … +100 % (more room between statuses). **Line style**: right-angle or curved.
-  **Use Jira Status positions** places the statuses where the Jira workflow editor has them (the X / Y values Jira reports;
+  **Use Jira Status positions** places the statuses where the Jira workflow editor has them (the X / Y values Jira reports, read as the top-left corner of a box that Jira sizes by its text, so statuses that Jira stacks in
+  one column share a centre line and their lines run straight, as in the Jira editor; every line also leaves and enters its status at the same
+  port (top, corner, side or bottom) that Jira used, and the two directions between two statuses keep their own transitions; when both use the same ports they are drawn on one line with a
+  head at each end, as in the Jira editor; the statuses and lines are never moved for the labels: when many transitions share one stretch and a label finds no free
+  place on it, the label moves to the nearest free place beside the line and a dotted leader joins it to its line, so labels never overlap
+  each other or a status; all labels are horizontal (they are never turned along a line);
   disabled when Jira gave none). The drawing is enlarged just enough that labels and lines have room.
   **Show all transition labels**: otherwise labels show for the hovered or selected item only.
+- The first line on a side of a status always leaves or enters at the **centre of that side**, also with *Use Jira Status positions*
+  (a line that cannot run straight from centre to centre gets a short bend instead); further lines on the same side sit beside it.
 - Labels are small, sit on their own line, are horizontal when there is room and turn along the line when not, and
   never touch other lines, statuses or labels.
 - **Save PNG** saves the diagram; **Edit in Jira** opens the workflow editor.
-- Tabs **Statuses** (ID, status, category, properties) and **Transitions** (ID, name with link, From → To, screen with link,
+- Tabs **Statuses** (ID, status, category, status properties) and **Transitions** (ID, name with link, From → To, screen with link,
   transition properties). A transition that customers can take in the Jira Service Management portal (property
   `servicedesk.customer.transition.active = true`) carries a yellow **Portal** tag next to its name, and the same tag is drawn at
   the end of its label in the flowchart, the PNG, and the draw.io diagram.
@@ -155,10 +162,10 @@ title and labels). Drag the handle between the settings and the preview to give 
 - **Selected workflows** and **Choose workflows** (back to Workflows).
 - **Page layout**: Columns (Single; Two columns narrow left / narrow right / equal; Three columns equal / narrow sides) and
   **Use the full page width**.
-- **Page elements** (tick to include): *Table of Contents macro*, *Workflow Information*, *Workflow Diagram* (option: *Use Jira Status positions*),
+- **Page elements** (tick to include): *Table of Contents macro*, *Workflow Information*, *Workflow Diagram*,
   *Workflow Details* (option: its own full-width section), *Raw JSON code block macro* (options: collapse, line numbers).
   **Placement**: drag elements between the columns or use ↑ ↓ ← →.
-- **Workflow diagram**: Width, *Show the transition labels*, **Status Size** (75–150 %), **Line Style**
+- **Workflow diagram**: Width, *Show the transition labels*, *Use Jira Status positions*, **Status Size** (75–150 %), **Line Style**
   (right-angle / curved), **Color Style** (category colours / monochrome), **Format** (PNG, or draw.io with an optional PNG
   preview), **Image Sharpness** (1× / 2× / 3×). **Save diagram…** writes the first workflow's diagram.
 - Generated page:
@@ -222,12 +229,45 @@ Every change the app makes (delete workflow / scheme, publish page, add report) 
   **Reset Appearance**. Changes apply immediately and are remembered.
 - **Preview** of the controls, and **Data and About** (version, release date, **Open Data Folder**).
 
+## 12. Help
+
+The **Help** page (side bar, above Settings; or press `F1`) is this user guide inside the app. The topics are on the left (one for each
+section of this README); the open topic is on the right with **Previous** and **Next** buttons to read on. Pressing `F1` on any page opens
+the topic of that page. The search box above the list keeps only the topics that contain every word you type and scrolls to the first
+match. **Troubleshooting** takes you straight to the solutions of common problems. Links between topics work inside the page; web links open
+in your browser. The guide is the README.md that comes with the program (it is bundled in the executable).
+
+## Troubleshooting
+
+| Problem | What to do |
+|---|---|
+| *Authentication failed* when you sign in | Check the site URL and the email. The API token must be pasted completely (a missing last character gives this error). |
+| *Not allowed to read … (403)* | Reading and deleting workflows, schemes and screens needs the **Administer Jira** permission. |
+| A service account is rejected | Create it in the Atlassian organization that owns the site, with the [scopes](#permissions-and-scopes) of the sign-in page (button **View the required permission scopes**). A service account cannot publish to another site. |
+| Resolutions, statuses or workflows are missing | Click **Fetch Workflows** (or `F5`) to read the site again; the account needs permission to see them. |
+| A workflow cannot be deleted | Only inactive workflows and schemes can be deleted, and Jira refuses default workflows and workflows that a draft uses. |
+| **Use Jira Status positions** is disabled | Jira did not report positions for that workflow (older workflows). It keeps the automatic layout. |
+| Publishing says a page already exists | A page with the same title in the space is overwritten on purpose; Confluence keeps the earlier version in the page history. |
+| *Could not attach …* while publishing | Confluence sometimes refuses a new attachment version; the app retries and then replaces the attachment. Publish again if it still fails. |
+| The diagram is missing on the page | Use the PNG format, or keep **Also show a PNG preview image** on with draw.io. |
+| Help shows no topics | `README.md` was not found next to the program; put it back in the program folder. |
+
+## What's new
+
+- **2.26** – Workflow diagram with *Use Jira Status positions*: statuses at Jira's positions, lines through Jira's own ports, two-way
+  transitions drawn as one double-headed line, horizontal labels that never overlap. Help page with this guide, F1 and search.
+- **2.25** – *Use Jira Status positions* moved next to *Show the transition labels*; *Status Properties* column in the workflow pop-up.
+- **2.22 – 2.24** – Properties column `S(n) / T(m)`; lines enter the centre of a side; Jira positions read as top-left corners.
+- **2.21** – Template preview shows the real page with its page hierarchy; multi-select Space filter with JSM tags; Workflow ID column.
+- **2.15 – 2.20** – Resolutions page; Statuses read only; Portal and JSM tags; Fluent 2 pass (grouped navigation, one-row command bar).
+- **2.0 – 2.14** – Settings page (color mode, accent, text size), sign-in loading steps, service-account scopes, this README.
+
 ## Look and feel
 
 The app follows the Microsoft Fluent 2 design language and uses the **Segoe UI** font.
 
 - **Navigation:** the sidebar groups the pages under *Inventory* (Workflows, Schemes, Statuses, Resolutions), *Documentation*
-  (Template, Publish, Job) and *Monitoring* (Logs); Sign In is at the top and Settings at the bottom.
+  (Template, Publish, Job) and *Monitoring* (Logs); Sign In is at the top, Help and Settings at the bottom.
 - **Page structure:** every page has the same parts: a title, one line that says what the page is for, a command bar (the filter options,
   the search box and the page actions in one row), the content, and a status line.
 - **Type ramp:** page titles 24 px, section headings 16 px, body text 14 px, captions 12 px (all scale with the text size in Settings).
@@ -243,6 +283,7 @@ Change colors, accent and text size under [Settings](#11-settings).
 | Keys | Action |
 |---|---|
 | `Ctrl+1` … `Ctrl+9` | Sign In, Workflows, Schemes, Statuses, Resolutions, Template, Publish, Job, Logs |
+| `F1` | Help (the topic of the current page) |
 | `Ctrl+,` | Settings |
 | `Ctrl+F` | Focus the search box of the page |
 | `F5` | Fetch again (Workflows, Schemes, Statuses, Resolutions) / reload the log |
